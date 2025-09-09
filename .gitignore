@@ -2,6 +2,10 @@
 *.mat
 *.asv
 
+# ignore auto-generated files
+hertzianForce.m
+dynamicEquation.m
+
 # ignore some folders
 meshDiagram
 modelDiagram
