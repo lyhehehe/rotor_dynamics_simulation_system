@@ -9,7 +9,7 @@ close all
 % input all positional, physical, and geometric parameters of the rotor
 InitialParameter = inputEssentialParameterTwinSpool(); % all shaft, disk, operation parameters are saved in this function file; you can open and check
 InitialParameter = inputBearingHertzTwinSpool2(InitialParameter); % all bearing parameters are saved in this file (But Hertzian force is not used in this example. You can control in this file)
-InitialParameter = inputIntermediateBearingTwinSpool(InitialParameter); % all inter-shft bearing parameters are saved in this file
+InitialParameter = inputIntermediateBearingTwinSpool2(InitialParameter); % all inter-shft bearing parameters are saved in this file
 
 % establish model automatically
 Parameter = establishModel(InitialParameter); % this function will create the global matrices in workspace (check Parameter), model and mesh diagram in folders: <modelDiagram>, <meshDiagram>
