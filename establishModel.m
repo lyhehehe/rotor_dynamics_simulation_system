@@ -59,11 +59,10 @@
 %       .matrixN: sparse matrix           % Transient matrix (n×n)
 %       .unbalanceForce: vector           % Unbalance force vector (n×1)
 %       .gravity: vector                  % Gravity force vector (n×1)
-%       .eccentricity: vector             % Disk eccentricity vector (m×1)
-%       .eccentricityPhase: vector        % Phase of Disk eccentricity vector (m×1)
+%       .unbalance: matrix                % Unbalance data [NodeID, ShaftID, Mag, Phase]
 %       .gyroscopic_with_domega: matrix   % Precomputed gyroscopic matrix (when applicable)
 %       .stiffnessLoosing: matrix         % Loosened bearing stiffness (if active)
-%       .dampingLoosing: matrix            % Loosened bearing damping (if active)
+%       .dampingLoosing: matrix           % Loosened bearing damping (if active)
 %
 %% Model Assembly Process
 % 1. Visualization:
@@ -138,6 +137,11 @@ end
 
 %%
 
+% standardize Input Parameter
+InitialParameter = standardizeInputParameter(InitialParameter);
+
+%%
+
 % plot the schematic diagram of the rotor
 if NameValueArgs.isPlotModel
     plotModel(InitialParameter);
@@ -154,13 +158,14 @@ end
 %%
 
 % generate FEM matrices of shaft
-[MShaft, KShaft, GShaft, NShaft, FgShaft] = femShaft( Parameter.Shaft,...
-                                                      Parameter.Mesh.nodeDistance );
+[MShaft, KShaft, GShaft, NShaft, FgShaft, ShaftUnbalanceData] = femShaft( Parameter.Shaft,...
+                                                      Parameter.Mesh.nodeDistance, ...
+                                                      Parameter.Mesh.ShaftElement);
 
 %%
 
 % generate FEM matrices of disk 
-[MDisk, GDisk, NDisk, QDisk, FgDisk, EDisk, EDiskPhase] = femDisk( Parameter.Disk,...
+[MDisk, GDisk, NDisk, FgDisk, DiskUnbalanceData] = femDisk( Parameter.Disk,...
                                                 [Parameter.Mesh.Node.dof] );
                              
 
@@ -196,7 +201,7 @@ end
 
 % expand the matrices about shaft
 shaftDofNum = length(MShaft);
-diskDofNum = length(MDisk);
+diskDofNum = length(MDisk); % MDisk has full size
 if diskDofNum > shaftDofNum
     MShaft = blkdiag( MShaft,zeros(diskDofNum - shaftDofNum) );
     KShaft = blkdiag( KShaft,zeros(diskDofNum - shaftDofNum) );
@@ -205,6 +210,67 @@ if diskDofNum > shaftDofNum
     FgShaft = [FgShaft; zeros((diskDofNum-shaftDofNum),1)];
 end
 clear shaftDofNum diskDofNum;
+
+
+%% 
+
+% collect the unbalance from shaft and disk
+% 1. Concatenate Raw Data
+% Both inputs are [NodeID, Magnitude, Phase]
+rawData = [ShaftUnbalanceData; DiskUnbalanceData];
+
+% Handle empty case
+if isempty(rawData)
+    Parameter.Mesh.Matrix.unbalance = [];
+    return;
+end
+
+% 2. Vector Summation (Handling Duplicate Nodes)
+% Decompose into Cartesian components (X and Y)
+% Ux = Mag * cos(Phase)
+% Uy = Mag * sin(Phase)
+nodeIDs = rawData(:, 1);
+Ux = rawData(:, 2) .* cos(rawData(:, 3));
+Uy = rawData(:, 2) .* sin(rawData(:, 3));
+
+% Use 'unique' and 'accumarray' to sum components for same NodeID
+[uniqueNodes, ~, idxMap] = unique(nodeIDs);
+
+sumUx = accumarray(idxMap, Ux);
+sumUy = accumarray(idxMap, Uy);
+
+% Recompose back to Polar coordinates (Magnitude and Phase)
+totalMag = sqrt(sumUx.^2 + sumUy.^2);
+totalPhase = atan2(sumUy, sumUx);
+
+% Filter out negligible unbalance (Numerical noise cleaning)
+tolerance = 1e-12;
+validIdx = totalMag > tolerance;
+
+finalNodes = uniqueNodes(validIdx);
+finalMag   = totalMag(validIdx);
+finalPhase = totalPhase(validIdx);
+
+% 3. Lookup Shaft ID
+% We need to know which shaft each node belongs to for speed control (omega)
+numValid = length(finalNodes);
+shaftIDs = zeros(numValid, 1);
+
+MeshNodes = Parameter.Mesh.Node; % Quick access
+
+for i = 1:numValid
+    nID = finalNodes(i);
+    % Lookup onShaftNo from the Node structure
+    shaftIDs(i) = MeshNodes(nID).onShaftNo;
+end
+
+% 4. Construct Final Matrix
+% Format: [NodeID, ShaftID, Magnitude, Phase]
+unbalance = [finalNodes, shaftIDs, finalMag, finalPhase];
+
+% Sort by NodeID for cleanliness
+[~, sortIdx] = sort(unbalance(:, 1));
+unbalance = unbalance(sortIdx, :);
 
 %%
 
@@ -219,8 +285,9 @@ K = KShaft +         KBearing + KInterBearing;
 G = GShaft + GDisk;
 N = NShaft + NDisk;
 C = CShaft +         CBearing + CInterBearing;
-Q = QDisk;
 Fg = FgShaft + FgDisk + FgBearing + FgInterBearing;
+Q = zeros(length(M), 1); % initial unbalance force
+
 
 % delete small values in matrix
 M(abs(M) < NameValueArgs.matrix_value_tol) = 0;
@@ -251,10 +318,9 @@ Matrix.stiffness = K; % n*n
 Matrix.gyroscopic = G; % n*n
 Matrix.damping = C; % n*n
 Matrix.matrixN = N; % n*n
-Matrix.unblanceForce = Q; % n*1
 Matrix.gravity = Fg; % n*1
-Matrix.eccentricity = EDisk'; % 1*m, m is the number of disks
-Matrix.eccentricityPhase = EDiskPhase'; % rad, 1*m, m is the number of disks
+Matrix.unblanceForce = Q; % n*1
+Matrix.unbalance = unbalance; % save unbalance data; Format: [NodeID, ShaftID, Magnitude, Phase]
 
 
 % pre-calculate G matrix to save time if accerleartion=0

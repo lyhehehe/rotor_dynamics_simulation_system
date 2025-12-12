@@ -40,6 +40,8 @@
 % * |samplingFrequency| - (Optional) Original sampling rate [Hz]:
 %   * Required for FFT visualizations
 % * |NameValueArgs| - (Optional) Processing parameters [name-value pairs]:
+%   * |plotDofs|: Vector of specific DOF indices to plot (default: [] -> plot all).
+%     Note: Automatically identifies and plots trajectory for nodes associated with these DOFs.
 %   * |fftXlim|: FFT frequency display limit (default: 500 Hz)
 %   * |T_window|: STFT window duration (default: (tSpan(2)-tSpan(1))/20 s)
 %   * |overlap|: STFT window overlap ratio (default: 2/3)
@@ -63,7 +65,7 @@
 %    * Plots displacement vs. time for each DOF
 %    * Automatic unit selection (m/rad) based on DOF type
 % 2. Axis Trajectory:
-%    * 2D: Cross-sectional shaft orbits
+%    * 2D: Cross-sectional shaft orbits (Automatically mapped from selected DOFs)
 %    * 3D: Spatial shaft deformation along length
 % 3. Phase Portraits:
 %    * Velocity vs. displacement for each DOF
@@ -81,6 +83,7 @@
 %    * Automatic DOF labeling (Node-X-DOF-Y)
 %    * Unit adaptation based on DOF type (translation/rotation)
 % 2. Adaptive Processing:
+%    * User-defined DOF selection via 'plotDofs'
 %    * Time-range selection (tSpan)
 %    * Data downsampling (reduceInterval)
 % 3. Advanced Signal Processing:
@@ -93,17 +96,16 @@
 %    * Multi-format export (.fig, .eps, .png)
 %
 %% Examples
-% % Basic usage with displacement and FFT plots
+% % Basic usage with displacement and FFT plots (plots all DOFs)
 % SwitchFig = struct('displacement', true, 'fftSteady', true);
 % signalProcessing(q, dq, t, sysParams, SwitchFig);
+%
+% % Plot specific DOFs only (e.g., DOF 1, 13, and 17)
+% signalProcessing(q, dq, t, sysParams, SwitchFig, [], [], 'plotDofs', [1, 13, 17]);
 %
 % % Transient analysis with custom STFT parameters
 % signalProcessing(q, dq, t, sysParams, SwitchFig, [1 5], 2000, ...
 %     'T_window', 0.2, 'overlap', 0.75, 'fftXlim', 1000);
-%
-% % Full 3D visualization suite
-% SwitchFig = struct('axisTrajectory3d', true, 'poincare_phase', true);
-% signalProcessing(q, dq, t, sysParams, SwitchFig);
 %
 %% Directory Structure
 % Creates and manages the following output directories:
@@ -134,7 +136,7 @@
 %    * samplingFrequency must be provided for spectral analysis
 % 2. Large Dataset Handling:
 %    * Use reduceInterval for downsampling
-%    * Select specific tSpan ranges
+%    * Select specific tSpan ranges or use 'plotDofs' to reduce figure count
 % 3. Publication Figures:
 %    * Enable isPlotInA4 for standardized formatting
 %    * Use saveEps for vector graphics
@@ -148,7 +150,6 @@
 
 
 function signalProcessing(q, dq, t, Parameter, tSpan, samplingFrequency, SwitchFigure, NameValueArgs)
-
 arguments % name value pair
     q
     dq
@@ -165,32 +166,25 @@ arguments % name value pair
     NameValueArgs.reduceInterval = 1;
     NameValueArgs.isPlotInA4 = false;
     NameValueArgs.f = 1:0.2:200;
+    NameValueArgs.plotDofs = []; % Default is empty, meaning "Plot ALL" to preserve legacy behavior
 end
-
 % input parameter
 if nargin < 7 && SwitchFigure.fftTransient == false && SwitchFigure.fftSteady == false
     samplingFrequency = [];
 elseif nargin < 7 && (SwitchFigure.fftTransient == true || SwitchFigure.fftSteady == true)
     error('must input samplingFrequency in signalProcessing( )')
 end
-
 if nargin < 6 
     tSpan = [t(1), t(end)];
 end
-
 %%
-
 % initialize the directory
 refreshDirectory('signalProcess');
-
 %%
-
 % find the index in t to match tSpan
 [~, tStartIndex] = min(abs(t - tSpan(1)));
 [~, tEndIndex]   = min(abs(t - tSpan(2))); 
-
 %%
-
 %name the label
 dofNum          = Parameter.Mesh.dofNum;
 nodeNum         = Parameter.Mesh.nodeNum;
@@ -209,18 +203,31 @@ for iDof = 1:1:dofNum
     figureIdentity{iDof}=['Node-',num2str(dofOnNodeNo(iDof)),'-DOF-',num2str(dofInThisNode)];
 end
 
+% --- Modified: Logic to determine which DOFs and Nodes to plot ---
+if isempty(NameValueArgs.plotDofs)
+    validDofs = 1:dofNum; % Plot ALL if argument is empty (Default)
+else
+    % Intersect ensures we don't crash if user inputs out-of-bounds index
+    validDofs = intersect(NameValueArgs.plotDofs, 1:dofNum); 
+    if isempty(validDofs)
+        warning('User specified DOFs are invalid. Plotting ALL DOFs instead.');
+        validDofs = 1:dofNum;
+    end
+end
+% Determine associated nodes for Axis Trajectory (using unique to avoid duplicates)
+targetNodes = unique(dofOnNodeNo(validDofs)); 
+% -----------------------------------------------------------------
 
 % save figure name
 dofNo = 1; % default value for app: postprocess
 save("postProcessData", 'figureIdentity', 'dofNo')
-
 %% Part I: Displacement
-
 if SwitchFigure.displacement
     refreshDirectory('signalProcess/displacement')
     xspan = t(tStartIndex:tEndIndex);
     yspan = q(:,tStartIndex:tEndIndex);
-    for iDof=1:1:dofNum
+    % --- Modified Loop ---
+    for iDof = validDofs 
         figureName = ['Displacement ',figureIdentity{iDof}];
         
         isBearing = Node(dofOnNodeNo(iDof)).isBearing;
@@ -244,15 +251,14 @@ if SwitchFigure.displacement
         close(h)
     end
 end
-
 %% Part II: Axis Trajectory
-
 if SwitchFigure.axisTrajectory
     refreshDirectory('signalProcess/axisTrajectory')
     xspan = zeros(nodeNum,size(q,2));
     yspan = xspan;
     dofInThisNode = 0;
     nodeNo = 1;
+    % Data preparation loop kept as is (fast enough, robust)
     for iDof=1:1:dofNum
         if nodeNo == dofOnNodeNo(iDof)
             dofInThisNode = dofInThisNode + 1;
@@ -270,7 +276,9 @@ if SwitchFigure.axisTrajectory
     yspan = yspan(:,tStartIndex:tEndIndex);
     xspan = xspan(:,tStartIndex:tEndIndex);
     
-    for iNode = 1:1:nodeNum
+    % --- Modified Loop: Iterate over targetNodes (unique list) ---
+    % Note: transpose targetNodes to ensure it works in for-loop regardless of dimension
+    for iNode = reshape(targetNodes, 1, [])
         figureName = ['AxisTrajectory ','Node-',num2str(iNode)];
         ylabelname = '$W$ (m)';
         xlabelname = '$V$ (m)';
@@ -285,15 +293,14 @@ if SwitchFigure.axisTrajectory
         close
     end 
 end
-
 %% Part III: Phase Diagram 
-
 if SwitchFigure.phase
     refreshDirectory('signalProcess/phase')
     xspan = q(:,tStartIndex:tEndIndex);%Extract the x
     yspan = dq(:,tStartIndex:tEndIndex);%Extract the y
     %cspan = t(tStartIndex:tEndIndex);
-    for iDof = 1:1:dofNum
+    % --- Modified Loop ---
+    for iDof = validDofs
         figureName = ['Phase ',figureIdentity{iDof}];%name the figure
         yspan(iDof,end) = NaN;%set the NaN at the end of data in order to control curve not close
         
@@ -321,14 +328,13 @@ if SwitchFigure.phase
         close
     end 
 end
-
 %% Part IV: FFT--Steady State
-
 if SwitchFigure.fftSteady
     refreshDirectory('signalProcess/fftSteady')
     signal = q(:,tStartIndex:tEndIndex);
     signallength = length(signal);   
-    for iDof=1:1:dofNum
+    % --- Modified Loop ---
+    for iDof = validDofs
         % calculate
         Y  = fft(signal(iDof,:)); 
         P2 = abs(Y/signallength); 
@@ -361,9 +367,7 @@ if SwitchFigure.fftSteady
         close(h)
     end
 end
-
 %% Part V: FFT--transient State
-
 if SwitchFigure.fftTransient
     
     refreshDirectory('signalProcess/fftTransient')
@@ -375,10 +379,9 @@ if SwitchFigure.fftTransient
     window = round(T_window*samplingFrequency); % time window [s]
     noverlap = round(window*overlap); % overlap point number
     f = NameValueArgs.f;
-
-
     % plot for all dofs
-    for iDof = 1:1:dofNum
+    % --- Modified Loop ---
+    for iDof = validDofs
         % define data here
         data = q(iDof, tStartIndex:tEndIndex)';
         
@@ -389,7 +392,6 @@ if SwitchFigure.fftTransient
             % plot 3d fft [Hz]
             [s_fft3d, f_fft3d, t_fft3d] = spectrogram(data ,window, noverlap, f, samplingFrequency);
             waterfall(f_fft3d(5:end), t_fft3d+tSpan(1), abs(s_fft3d(5:end,:))'.^2)
-
             set(gca, ...
                     'Box'         , 'on'                        , ...
                     'TickDir'     , 'in'                        , ...
@@ -424,33 +426,24 @@ if SwitchFigure.fftTransient
         end % end if
         figureName=['FFT ',figureIdentity{iDof}];
         title(figureName,'Fontname', 'Arial');
-
         % save figure
         figurePath = ['signalProcess/fftTransient/',figureIdentity{iDof}];
         isVisible = true;
         saveFigure(h, figurePath, SwitchFigure.saveFig, isVisible, SwitchFigure.saveEps);
         close
-
     end % end for iDof
    
 end % end if
-
 %% Part VI: Poincare surface of section
-
 if SwitchFigure.poincare
     
     refreshDirectory('signalProcess/poincare')
-
     shaftNum = Parameter.Shaft.amount;
     % get revolution start point
     tk = get_tk_from_simulation2(Parameter.Status, t(tStartIndex:tEndIndex), shaftNum);
-
-
     %Initialize to save data
     saveDisplacement = cell(shaftNum,1); 
     saveSpeed = cell(shaftNum,1);
-
-
     % calculate poincare point
     for iSection = 1:1:shaftNum
         q_section = interp1(t, q', tk{iSection});
@@ -463,8 +456,8 @@ if SwitchFigure.poincare
     % plot
     xspan=saveDisplacement; % cell data
     yspan=saveSpeed;
-    for iDof=1:1:dofNum
-
+    % --- Modified Loop ---
+    for iDof = validDofs
         figureName = ['Poincare ',figureIdentity{iDof}];
         
         isBearing = Node(dofOnNodeNo(iDof)).isBearing;
@@ -503,8 +496,8 @@ if SwitchFigure.poincare
         close
     end
 end
-
 %% Part VII: 3D Axis Trajectory
+% --- NOT Modified (Kept Global/Shaft based as requested) ---
 if SwitchFigure.axisTrajectory3d
     refreshDirectory('signalProcess/axisTrajectory3d')
     xspan = zeros(nodeNum,size(q,2));
@@ -568,22 +561,15 @@ if SwitchFigure.axisTrajectory3d
         nodeStart = nodeEnd + 1;
     end
 end
-
-
 %% Part VIII: Poincare Section with Phase
 if SwitchFigure.poincare_phase
     refreshDirectory('signalProcess/poincare_phase')
-
     shaftNum = Parameter.Shaft.amount;
     % get revolution start point
     tk = get_tk_from_simulation2(Parameter.Status, t(tStartIndex:tEndIndex), shaftNum);
-
-
     %Initialize to save data
     saveDisplacement = cell(shaftNum,1); 
     saveSpeed = cell(shaftNum,1);
-
-
     % calculate poincare point
     for iSection = 1:1:shaftNum
         q_section = interp1(t, q', tk{iSection});
@@ -598,8 +584,8 @@ if SwitchFigure.poincare_phase
     yspan=saveSpeed;
     xspan2 = q(:,tStartIndex:tEndIndex);%Extract the x
     yspan2 = dq(:,tStartIndex:tEndIndex);%Extract the y
-    for iDof=1:1:dofNum
-
+    % --- Modified Loop ---
+    for iDof = validDofs
         figureName = ['Poincare ',figureIdentity{iDof}];
         
         isBearing = Node(dofOnNodeNo(iDof)).isBearing;
@@ -617,7 +603,6 @@ if SwitchFigure.poincare_phase
         
         legends = cell(shaftNum+1,1);
         legends{1} = 'Phase';
-
         h=figure('Visible', 'off');
         % plot phase
         plot(xspan2(iDof,:),yspan2(iDof,:)); hold on
@@ -645,11 +630,8 @@ if SwitchFigure.poincare_phase
         saveFigure(h, figurePath, SwitchFigure.saveFig, isVisible, SwitchFigure.saveEps);
         close
     end % end for iDof (plot)
-
 end % end if SwitchFigure.poincare_phase
-
 %% 
-
 % sub function 1
 function refreshDirectory(pathName)
 hasFolderSubFun = exist(pathName,'dir');
@@ -660,7 +642,6 @@ hasFolderSubFun = exist(pathName,'dir');
         mkdir(pathName);
     end
 end
-
 % sub function 2
 function saveFigure(figHandle, figureName, isSaveFig, isVisible, isSaveEps)
 if isSaveFig
@@ -670,15 +651,11 @@ if isSaveFig
     figName = [figureName, '.fig'];
     savefig(figHandle,figName)
 end
-
 if isSaveEps
     epsName = [figureName, '.eps'];
     print(figHandle, epsName, '-depsc2');
 end
-
 pngName = [figureName, '.png'];
 print(figHandle, pngName, '-dpng', '-r400');
-
 end % end subFunciton
-
 end % end function

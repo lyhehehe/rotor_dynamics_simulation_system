@@ -4,14 +4,14 @@
 % gravity and eccentricity force vectors for disk elements in rotor systems.
 %
 %% Syntax
-%  [Me, Ge, Ne, Fge, Ee] = diskElement(ADisk)
+%  [Me, Ge, Ne, Fge, UnbalInfo] = diskElement(ADisk)
 %
 %% Description
 % |diskElement| calculates finite element matrices for disk components 
 % using thin disk approximation. The function:
 % * Computes disk mass and inertia properties
 % * Constructs mass and gyroscopic matrices
-% * Generates gravity and eccentricity force vectors
+% * Generates gravity force vector and unbalance information
 % * Supports mass unbalance modeling
 %
 %% Input Arguments
@@ -22,6 +22,7 @@
 %   * |density|           % Material density [kg/m³]
 %   * |thickness|         % Axial thickness [m]
 %   * |eccentricity|      % Mass eccentricity [m]
+%   * |eccentricityPhase| % Phase of mass eccentricity [rad]
 %
 %% Output Arguments
 % * |Me|  - Mass matrix (4×4) combining translational and rotational inertia
@@ -29,8 +30,9 @@
 % * |Ne|  - Transient matrix (4×4) for taking into account transient
 %           dynamic behavior
 % * |Fge| - Gravity force vector (4×1) [N]
-% * |Ee|  - Eccentricity force magnitude [N]
-% * |EePhase| - Phase of eccentricity [rad]
+% * |UnbalInfo| - Unbalance properties structure:
+%       .Magnitude        % Static unbalance (m * e) [kg·m]
+%       .Phase            % Phase of unbalance [rad]
 %
 %% Physical Formulation
 % 1. Mass Calculation:
@@ -62,14 +64,15 @@
 % 3. Gravity Vector (Fge):
 %    $ Fge = \begin{bmatrix} 0 \\ -mg \\ 0 \\ 0 \end{bmatrix} $
 %
-% 4. Eccentricity Force (Ee):
-%    $ Ee = m \cdot e $
+% 4. Unbalance Information (UnbalInfo):
+%    Magnitude = $ m \cdot e $
+%    Phase = input phase
 %
 %% Implementation Notes
 % * Uses thin disk approximation (axial thickness << diameter)
 % * Accounts for both diametral and polar inertia effects
 % * Gravity acts in negative Y-direction (vertical downward)
-% * Eccentricity modeled as static unbalance force
+% * Eccentricity returned as mass moment (requires $\omega^2$ for force)
 %
 %% Example
 % % Configure disk parameters
@@ -78,9 +81,10 @@
 %                  'innerRadius', 0.05, ...
 %                  'density', 7850, ...
 %                  'thickness', 0.025, ...
-%                  'eccentricity', 0.0001);
+%                  'eccentricity', 0.0001, ...
+%                  'eccentricityPhase', 0);
 % % Generate disk element matrices
-% [Me, Ge, ~, Fg, Ecc] = diskElement(diskCfg);
+% [Me, Ge, ~, Fg, UnbalInfo] = diskElement(diskCfg);
 %
 %% See Also
 % shaftElement, bearingElement, assembleGlobalMatrix
@@ -90,35 +94,39 @@
 %
 
 
-function [Me, Ge, Ne, Fge, Ee, EePhase] = diskElement(ADisk)
+function [Me, Ge, Ne, Fge, UnbalInfo] = diskElement(ADisk)
+%% diskElement - Generate matrices for a single disk element
+%
+% Calculates mass, gyroscopic, and circulatory matrices for a lumped disk.
+% Also calculates static gravity load and unbalance vector.
+%
+% Output:
+%   UnbalInfo - Structure with .Magnitude and .Phase
 
-% check the input
+% Check input consistency
 fieldName = {'dofOfEachNodes', 'outerRadius', 'innerRadius', 'density', 'thickness'};
 hasFieldName = isfield(ADisk, fieldName);
 if length(hasFieldName) ~= sum(hasFieldName)
-    error('Incorrect field names for input struct')
+    error('Incorrect field names for input struct');
 end
 
-%%
-
-% calculate the constants
+%% 1. Calculate Physical Properties
 r1 = ADisk.innerRadius;
 r2 = ADisk.outerRadius;
 thickness = ADisk.thickness;
 rho = ADisk.density;
 eDisk = ADisk.eccentricity;
-m = (r2^2 - r1^2) * pi* thickness * rho;
-Id = 1/12 * m * (3*(r1^2+r2^2)+thickness^2);
-Ip = 1/2 * m * (r1^2+r2^2);
 
-%%
+% Mass and Moments of Inertia
+m = (r2^2 - r1^2) * pi * thickness * rho;
+Id = 1/12 * m * (3*(r1^2 + r2^2) + thickness^2); % Diametral
+Ip = 1/2 * m * (r1^2 + r2^2);                   % Polar
 
-% mass matrix
+%% 2. Mass Matrix (M)
 MT = [ m, 0, 0, 0;...
        0, m, 0, 0;...
        0, 0, 0, 0;...
        0, 0, 0, 0 ];
-
 MR = [ 0,  0,  0,  0;...
        0,  0,  0,  0;...
        0,  0, Id,  0;...
@@ -126,35 +134,25 @@ MR = [ 0,  0,  0,  0;...
    
 Me = MT + MR;
 
-%%
-
-% gyrosocpic matrix
+%% 3. Gyroscopic Matrix (G)
 Ge = [  0,   0,   0,   0;...
         0,   0,   0,   0;...
         0,   0,   0, -Ip;...
         0,   0,  Ip,   0 ]; 
   
-%%
-
-% Ne matrix
+%% 4. Circulatory Matrix (N)
 Ne = [  0,   0,   0,   0;...
         0,   0,   0,   0;...
         0,   0,   0,   0;...
         0,   0,  Ip,   0 ]; 
 
-%%
-
-% gravity
+%% 5. Gravity Vector
 FgeTotal = m * 9.8; % N
 Fge = [0; -FgeTotal; 0; 0];
 
-
-%%
-
-% eccentricity
-Ee = m * eDisk;
-
-% eccentricity phase
-EePhase = ADisk.eccentricityPhase;
+%% 6. Unbalance Information
+% Calculate Unbalance Moment (Mass * Eccentricity)
+UnbalInfo.Magnitude = m * eDisk;
+UnbalInfo.Phase = ADisk.eccentricityPhase;
 
 end

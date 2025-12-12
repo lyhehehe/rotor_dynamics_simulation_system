@@ -1,18 +1,19 @@
 %% femDisk - Generate FEM matrices for disk components in rotor systems
 %
 % This function assembles global mass, gyroscopic, and transient matrices 
-% along with gravity and eccentricity vectors for disk elements in rotor 
+% along with gravity vectors and unbalance data for disk elements in rotor 
 % dynamics models.
 %
 %% Syntax
-%  [M, G, N, Q, Fg, E] = femDisk(Disk, nodeDof)
+%  [M, G, N, Fg, DiskUnbalanceData] = femDisk(Disk, nodeDof)
 %
 %% Description
 % |femDisk| constructs finite element matrices for disk components in 
 % rotor systems. The function:
 % * Computes disk mass and inertia properties
 % * Generates mass and gyroscopic matrices
-% * Creates gravity and eccentricity force vectors
+% * Creates gravity force vectors
+% * Aggregates unbalance information (Magnitude/Phase) per node
 % * Supports multiple disk configurations
 %
 %% Input Arguments
@@ -31,10 +32,11 @@
 % * |M|  % Global mass matrix [sparse n_total×n_total]
 % * |G|  % Global gyroscopic matrix [sparse n_total×n_total]
 % * |N|  % Nonlinear matrix [sparse n_total×n_total]
-% * |Q|  % Unbalance force vector [n_total×1] (currently zeros)
 % * |Fg| % Gravity force vector [n_total×1]
-% * |E|  % Mass eccentricities [m] [N×1 vector]
-% * |EPhase| % Phase of mass eccentricities [rad] [N×1 vector]
+% * |DiskUnbalanceData| % Unbalance data matrix [N_valid×3]:
+%       Column 1: Node ID
+%       Column 2: Magnitude [kg·m] (Mass × Eccentricity)
+%       Column 3: Phase [rad]
 %   * n_total: Total DOF of rotor system = sum(nodeDof)
 %
 %% Matrix Assembly Process
@@ -44,13 +46,14 @@
 %      - Gyroscopic matrix (Ge)
 %      - Transient matrix (Ne)
 %      - Gravity force vector (Fge)
-%      - Eccentricity value (E)
+%      - Unbalance Information (Magnitude/Phase)
 % 2. Global Matrix Initialization:
 %    * Creates zero matrices of size sum(nodeDof)
 % 3. Position Mapping:
 %    * Determines DOF positions using |findIndex|
 % 4. Assembly:
 %    * Adds each disk's matrices to global positions via |addElementIn|
+%    * Aggregates and filters unbalance data
 %
 %% Physical Modeling
 % * Mass Calculation:
@@ -64,8 +67,8 @@
 %
 %% Implementation Notes
 % * Eccentricity Handling:
-%   * Returns eccentricity values but doesn't incorporate in force vector
-%   * Unbalance force vector (Q) currently returns zeros
+%   * Returns unbalance data matrix [NodeID, Mag, Phase]
+%   * Filters out negligible unbalance values (< 1e-15)
 % * Position Mapping:
 %   * Uses |findIndex| for DOF position calculation
 % * Matrix Assembly:
@@ -84,7 +87,7 @@
 % % System DOF configuration
 % nodeDOF = [4,4,4,4,4,4,4,4,4,4]'; 
 % % Generate disk matrices
-% [M, G, ~, ~, Fg, Ecc] = femDisk(diskCfg, nodeDOF);
+% [M, G, ~, Fg, UnbalData] = femDisk(diskCfg, nodeDOF);
 %
 %% See Also
 % diskElement, addElementIn, findIndex, femShaft, femBearing
@@ -95,49 +98,60 @@
 
 
 
-function [M, G, N, Q, Fg, E, EPhase] = femDisk(Disk,nodeDof)
+function [M, G, N, Fg, DiskUnbalanceData] = femDisk(Disk, nodeDof)
 
 
-% generate elements
+% Initialize element matrix storage
 Me = cell(Disk.amount,1); 
 Ge = cell(Disk.amount,1);
 Ne = cell(Disk.amount,1);
 Fge = cell(Disk.amount,1);
-E = zeros(Disk.amount,1);
-EPhase = zeros(Disk.amount,1);
-Temporary = rmfield(Disk,'amount'); % for extract part of data of Shaft
 
+% Initialize Unbalance Data Storage
+% Format: [NodeID, Magnitude, Phase]
+rawUnbalance = zeros(Disk.amount, 3);
+
+% Prepare temporary struct for getStructPiece (Legacy support)
+Temporary = rmfield(Disk, 'amount'); 
+
+%% 1. Element Generation Loop
 for iDisk = 1:1:Disk.amount
-    % get the information of ith Disk
-    ADisk = getStructPiece(Temporary,iDisk,[]);
-    % generate elements
-    [Me{iDisk}, Ge{iDisk}, Ne{iDisk}, Fge{iDisk}, E(iDisk), EPhase(iDisk)] = diskElement(ADisk); 
+    % Extract single disk data
+    ADisk = getStructPiece(Temporary, iDisk, []);
+    
+    % Generate matrices and unbalance info for this disk
+    [Me{iDisk}, Ge{iDisk}, Ne{iDisk}, Fge{iDisk}, unbalInfo] = diskElement(ADisk); 
+    
+    % Store Unbalance Data
+    % Disk.positionOnShaftNode contains the Global Node ID
+    nodeID = Disk.positionOnShaftNode(iDisk);
+    rawUnbalance(iDisk, :) = [nodeID, unbalInfo.Magnitude, unbalInfo.Phase];
 end
 
-%%
-
-% generate global matrices and vector
+%% 2. Global Matrix Assembly
 dofNum = sum(nodeDof);
 M = zeros(dofNum, dofNum);
 G = zeros(dofNum, dofNum);
 N = zeros(dofNum, dofNum);
 Fg = zeros(dofNum, 1);
 
-%%
+% Calculate the position of disk element in global matrix
+% (Maps Node ID to Matrix Indices)
+diskOnDofPosition = findIndex(Disk.positionOnShaftNode, nodeDof);
 
-% calculate the position of disk element in global matrix
-diskOnDofPosition = findIndex(Disk.positionOnShaftNode,nodeDof);
-
-%%
-
-% put disk elements into global matrices
 for iDisk = 1:1:Disk.amount
-   M = addElementIn( M, Me{iDisk}, diskOnDofPosition(iDisk, :) );
-   G = addElementIn( G, Ge{iDisk}, diskOnDofPosition(iDisk, :) );
-   N = addElementIn( N, Ne{iDisk}, diskOnDofPosition(iDisk, :) );
-   Fg = addElementIn(Fg, Fge{iDisk}, [diskOnDofPosition(iDisk,1),1]);
+   M = addElementIn(M, Me{iDisk}, diskOnDofPosition(iDisk, :));
+   G = addElementIn(G, Ge{iDisk}, diskOnDofPosition(iDisk, :));
+   N = addElementIn(N, Ne{iDisk}, diskOnDofPosition(iDisk, :));
+   Fg = addElementIn(Fg, Fge{iDisk}, [diskOnDofPosition(iDisk,1), 1]);
 end
 
-Q = zeros(dofNum,1);
+%% 3. Process Disk Unbalance Data
+% Filter out disks with zero unbalance (Optional, but good for consistency)
+tolerance = 1e-15;
+validIndices = rawUnbalance(:, 2) > tolerance;
+
+% Output formatted matrix
+DiskUnbalanceData = rawUnbalance(validIndices, :);
 
 end

@@ -105,7 +105,7 @@ Ke = [ kV,  kHV;
    
 % Expand stiffness matrix (fill remaining DOFs with zeros)
 % Note: Using dof - 2 because the bearing matrix is explicitly 2x2
-Ke = blkdiag( Ke, zeros(dof) ); 
+Ke = blkdiag( Ke, zeros(dof-2) ); 
 
 %% generate damping matrix of bearing element
 % Modified to include cross-coupling terms
@@ -113,6 +113,6 @@ Ce = [ cV,  cHV;
        cVH, cW ];
 
 % Expand damping matrix (fill remaining DOFs with zeros)
-Ce = blkdiag( Ce, zeros(dof) ); 
+Ce = blkdiag( Ce, zeros(dof-2) ); 
 
 end

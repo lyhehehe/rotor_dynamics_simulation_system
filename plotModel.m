@@ -1,27 +1,31 @@
 %% plotModel - Visualize 3D geometry of multi-shaft rotor systems
 %
 % This function generates detailed 3D schematic diagrams of rotor systems,
-% including shafts, disks, bearings, and intermediate bearings with
-% automatic alignment based on system configuration.
+% including shafts, disks, bearings, and intermediate bearings. It visualizes
+% both the physical geometric model and the equivalent stiffness model.
 %
 %% Syntax
 %   plotModel(InitialParameter)
 %
 %% Description
 % |plotModel| creates comprehensive 3D visualizations of rotor systems:
-% * Renders cylindrical shafts with inner/outer diameters
+% * Renders cylindrical shafts with inner/outer diameters (segmented)
 % * Displays disk geometries at specified positions
 % * Visualizes bearing housings as triangular blocks
 % * Automatically calculates intermediate bearing alignments
-% * Generates both per-shaft and composite system diagrams
+% * Generates diagrams for:
+%   1. Geometric Model (Physical dimensions)
+%   2. Stiffness Model (Equivalent stiffness diameters, if available)
 %
 %% Input Arguments
 % * |InitialParameter| - System configuration structure containing:
 %   * |Shaft|: [1×1 struct]              % Shaft properties
 %     .amount             % Number of shafts [scalar]
-%     .totalLength        % Axial lengths [m] [N×1 vector]
-%     .outerRadius        % Outer radii [m] [N×1 vector]
-%     .innerRadius        % Inner radii [m] [N×1 vector]
+%     .segmentLength      % Segment lengths [Cell array of vectors]
+%     .outerRadius        % Physical outer radii [Cell array of vectors]
+%     .innerRadius        % Physical inner radii [Cell array of vectors]
+%     .outerRadiusStiff   % (Optional) Stiffness outer radii [Cell array]
+%     .innerRadiusStiff   % (Optional) Stiffness inner radii [Cell array]
 %   * |Disk|: [1×1 struct]               % Disk parameters
 %     .amount             % Number of disks [scalar]
 %     .inShaftNo          % Parent shaft indices [M×1 vector]
@@ -39,46 +43,39 @@
 %
 %% Output
 % Creates in './modelDiagram' directory:
-% * |diagramOfShaft[n].fig|    % Individual shaft diagrams (MATLAB figures)
-% * |diagramOfShaft[n].png|    % Individual shaft images
-% * |theWholeModel.fig|        % Composite system diagram (MATLAB figure)
-% * |theWholeModel.png|        % Composite system image
+% * |diagramOfShaft[n].png|           % Physical shaft images
+% * |theWholeModel.png|               % Composite physical system image
+% * |diagramOfShaft[n]_Stiffness.png| % Stiffness model shaft images (if applicable)
+% * |theWholeModel_Stiffness.png|     % Composite stiffness system image (if applicable)
+% * corresponding |.fig| files for all outputs
 %
 %% Visualization Features
-% 1. Component Rendering:
-%    * Shafts: Hollow cylinders with inner/outer diameters
+% 1. Dual Model Rendering:
+%    * Geometric Mode: Visualizes actual physical dimensions
+%    * Stiffness Mode: Visualizes equivalent stiffness diameters (useful for stepped shafts)
+% 2. Component Rendering:
+%    * Shafts: Segmented hollow cylinders
 %    * Disks: Solid cylinders with specified thickness
 %    * Bearings: Triangular housing structures
-% 2. Automatic Alignment:
+% 3. Automatic Alignment:
 %    * Calculates shaft position offsets from intermediate bearings
 %    * Maintains geometric relationships between connected shafts
-% 3. Lighting and Rendering:
+% 4. Lighting and Rendering:
 %    * Dual directional lighting (cool/warm tones)
 %    * Gouraud shading for smooth surfaces
-% 4. Resolution Control:
-%    * Shafts: 20 circumferential nodes
-%    * Disks: 30 circumferential nodes
-%    * Bearings: 15 surface nodes
 %
 %% Implementation Details
-% 1. Offset Calculation:
+% 1. Model Iteration:
+%    * Loops through 'Geometric' and 'Stiffness' modes
+%    * Selects appropriate radius data for each pass
+% 2. Offset Calculation:
 %    * Computes shaft position adjustments based on intermediate bearings
-%    * Maintains first shaft as reference (offset = 0)
-% 2. Directory Management:
+% 3. Directory Management:
 %    * Creates 'modelDiagram' directory if missing
 %    * Clears previous outputs before generation
-% 3. Visualization Pipeline:
-%    a) Per-shaft figure creation
-%    b) Component-by-component rendering:
-%        - Shaft base cylinder
-%        - Disk cylinders
-%        - Bearing housings
-%    c) Lighting and view configuration
-%    d) Composite figure assembly
 % 4. Composite Diagram:
 %    * Combines all shafts into single visualization
 %    * Preserves component colors and styles
-%    * Enables full system inspection
 %
 %% Example
 % % Configure and visualize rotor system
@@ -89,15 +86,11 @@
 %
 %% Component Rendering Notes
 % * Shaft Dimensions:
-%    Outer radius: Shaft.outerRadius
-%    Inner radius: Shaft.innerRadius (for hollow shafts)
-% * Disk Scaling:
-%    Thickness: Disk.thickness
-%    Radius: Disk.outerRadius
+%    - Geometric Mode: Uses Shaft.outerRadius / Shaft.innerRadius
+%    - Stiffness Mode: Uses Shaft.outerRadiusStiff / innerRadiusStiff
+%    - If Stiffness radii are NaN/missing, falls back to geometric radii
 % * Bearing Housing:
-%    Height: max(diskRadius×1.25, shaftRadius×2.5)
-%    Width: Same as height
-%    Thickness: min(diskThickness)×0.6
+%    - Housing hole size adapts to the shaft diameter of the active mode
 %
 %% See Also
 % addCylinder, addTriangularBlock, CombFigs, inputEssentialParameterBO
@@ -108,39 +101,33 @@
 
 
 function plotModel(InitialParameter)
-
 Shaft = InitialParameter.Shaft;
 Disk = InitialParameter.Disk;
 Bearing = InitialParameter.Bearing;
 
-%%
-
-%calculate the offset of each shafts due to the intermediate bearing
+%% 1. Calculate the offset (Shared for both models)
+% Offsets are based on segment lengths, which are assumed constant between 
+% geometric and stiffness models.
 offsetPosition = zeros(Shaft.amount,1);
 if isfield(InitialParameter,'IntermediateBearing')
-    InterBearing = InitialParameter.IntermediateBearing; % short the variable
+    InterBearing = InitialParameter.IntermediateBearing; 
     for iShaft = 1:1:Shaft.amount
-        if iShaft ==1
-            offsetPosition(1) = 0; % position of shaft 1 is reference
+        if iShaft == 1
+            offsetPosition(1) = 0; 
         else
             for iInterBearing = 1:1:InterBearing.amount
                 if InterBearing.betweenShaftNo(iInterBearing,2) == iShaft
                    basicShaftD = InterBearing.positionOnShaftDistance(iInterBearing, 1);
                    laterShaftD = InterBearing.positionOnShaftDistance(iInterBearing, 2);
                    basicShaftNo = InterBearing.betweenShaftNo(iInterBearing,1);
-                   offsetPosition(iShaft) = basicShaftD - laterShaftD...
-                                            + offsetPosition(basicShaftNo);
-                else
-                   offsetPosition(iShaft) = 0;
-                end % if InterBearing.betweenShaftNo(iInterBearing,2) == iShaft
-            end % for iInterBearing = 1:1:InterBearing.amount
-        end % if iShaft ==1
-    end % for iShaft = 1:1:Shaft.amount 
-end % if isfiled(InitialParameter,'IntermediateBearing')
+                   offsetPosition(iShaft) = basicShaftD - laterShaftD + offsetPosition(basicShaftNo);
+                end 
+            end 
+        end 
+    end 
+end 
 
-%%
-
-% gnerate folder to save figures
+%% 2. Setup Output Directory
 hasFolder = exist('modelDiagram','dir');
 if hasFolder
     delete modelDiagram/*.fig;
@@ -149,116 +136,171 @@ else
     mkdir('modelDiagram');
 end
 
-%%
+%% 3. Visualization Main Loop (Runs twice: Geometry & Stiffness)
+% mode 1: Geometric Model (Physical)
+% mode 2: Stiffness Model (Mathematical)
 
-% Create persistent figure for final composite
-wholeFig = figure('Visible', 'off');
-wholeAxes = axes(wholeFig);
-hold(wholeAxes, 'on');
+modelModes = {'Geometric', 'Stiffness'};
 
-% Process each shaft
-figureName = cell(Shaft.amount,1);
-
-
-for iShaft = 1:1:Shaft.amount
-    h = figure('visible','off');
-    ax_h = axes(h);
+for iMode = 1:length(modelModes)
+    currentMode = modelModes{iMode};
     
-    % shaft
-    positionX = Shaft.totalLength(iShaft)/2 + offsetPosition(iShaft);
-    position = [positionX, 0, 0]; % [x, y, z]
-    outerRadius = Shaft.outerRadius(iShaft);
-    innerRadius = Shaft.innerRadius(iShaft);
-    length = Shaft.totalLength(iShaft);
-    NODES = 20;
-    axisName = 'x';
-    addCylinder(ax_h, position, outerRadius, innerRadius, length, NODES, axisName);
+    % --- DATA SELECTION SWITCH ---
+    if strcmp(currentMode, 'Geometric')
+        % Use physical dimensions
+        activeOuterRadius = Shaft.outerRadius;
+        activeInnerRadius = Shaft.innerRadius;
+        fileSuffix = ''; % Standard filename
+        figTitlePrefix = 'Geometric Model';
+    else
+        % Use stiffness dimensions
+        % Check if stiffness data exists, if not, skip or fallback
+        if isfield(Shaft, 'outerRadiusStiff') && ~isempty(Shaft.outerRadiusStiff)
+            activeOuterRadius = Shaft.outerRadiusStiff;
+            activeInnerRadius = Shaft.innerRadiusStiff;
+            fileSuffix = '_Stiffness';
+            figTitlePrefix = 'Stiffness Model';
+        else
+            warning('Stiffness radius data not found. Skipping Stiffness Model plot.');
+            continue; 
+        end
+    end
     
+    % Create persistent figure for final composite of CURRENT mode
+    wholeFig = figure('Visible', 'off', 'Name', [figTitlePrefix, ' - Whole System']);
+    wholeAxes = axes(wholeFig);
+    hold(wholeAxes, 'on');
     
-    % disk
-    for iDisk = 1:1:Disk.amount
-        if Disk.inShaftNo(iDisk) == iShaft
-            positionX = Disk.positionOnShaftDistance(iDisk)...
-                        + offsetPosition(iShaft);
-            position = [positionX, 0, 0]; % [x, y, z]
-            outerRadius = Disk.outerRadius(iDisk);
-            innerRadius = Disk.innerRadius(iDisk);
-            length = Disk.thickness(iDisk);
-            NODES = 30;
+    figureName = cell(Shaft.amount,1);
+
+    for iShaft = 1:1:Shaft.amount
+        h = figure('visible','off', 'Name', [figTitlePrefix, ' - Shaft ', num2str(iShaft)]);
+        ax_h = axes(h);
+        hold(ax_h, 'on'); 
+        
+        % --- DRAW SHAFT (Segmented) ---
+        segLengths = Shaft.segmentLength{iShaft}; 
+        % Select the active radius for the current mode
+        segOuterR  = activeOuterRadius{iShaft}; 
+        segInnerR  = activeInnerRadius{iShaft};
+        
+        currentLocalZ = 0; 
+        
+        for iSeg = 1:length(segLengths)
+            L_seg = segLengths(iSeg);
+            R_out = segOuterR(iSeg);
+            R_in  = segInnerR(iSeg);
+            
+            % If Stiffness Radius is NaN (input convention), fallback to Geo Radius
+            % Note: Input function V2 seems to fill it, but good to be safe.
+            if isnan(R_out), R_out = Shaft.outerRadius{iShaft}(iSeg); end
+            if isnan(R_in),  R_in  = Shaft.innerRadius{iShaft}(iSeg); end
+            
+            positionX = offsetPosition(iShaft) + currentLocalZ + L_seg/2;
+            position = [positionX, 0, 0]; 
+            
+            NODES = 20;
             axisName = 'x';
-            addCylinder(ax_h, position, outerRadius, innerRadius, length, NODES, axisName);
-        end % end if
-    end % end for iDsk
-    
-    
-    % bearing
-    for iBearing = 1:1:Bearing.amount
-        if Bearing.inShaftNo(iBearing) == iShaft
-            positionX = Bearing.positionOnShaftDistance(iBearing)...
-                         + offsetPosition(iShaft);
-            position = [positionX, 0, 0]; % [x, y, z]
-            radius = Shaft.outerRadius(iShaft);
-            height_with_disk = max(Disk.outerRadius) * 1.25;
-            height_with_shaft = max(Shaft.outerRadius) * 2.5;
-            if height_with_disk >= height_with_shaft
-                height = height_with_disk;
-            else
-                height = height_with_shaft;
-            end % end if
-            width = height;
-            thickness = min(Disk.thickness) * 0.6;
-            NODES = 15;
-            axisName = 'x';
-            RotateInfo.isRotate = true;
-            RotateInfo.oringin = [0,0,0];
-            RotateInfo.direction = [1,0,0];
-            RotateInfo.angle = 90;
-            addTriangularBlock(ax_h, position,radius,height,width,thickness,NODES,axisName,RotateInfo);     
-        end % end if
-    end % end for iBearing
-    
-    % Copy contents to composite figure
-    allObjs = findall(h, 'type','axes');
-    toCopy = allchild(allObjs);
-    % Copy objects to composite figure
-    copyobj(toCopy, wholeAxes);
+            addCylinder(ax_h, position, R_out, R_in, L_seg, NODES, axisName);
+            
+            currentLocalZ = currentLocalZ + L_seg;
+        end
+        
+        % --- DRAW DISK (Invariant) ---
+        % Disks are physical masses, usually shown same in both models for reference
+        for iDisk = 1:1:Disk.amount
+            if Disk.inShaftNo(iDisk) == iShaft
+                positionX = Disk.positionOnShaftDistance(iDisk) + offsetPosition(iShaft);
+                position = [positionX, 0, 0];
+                % Disks always use physical dimensions
+                addCylinder(ax_h, position, Disk.outerRadius(iDisk), Disk.innerRadius(iDisk), ...
+                            Disk.thickness(iDisk), 30, 'x');
+            end 
+        end 
+        
+        % --- DRAW BEARING ---
+        for iBearing = 1:1:Bearing.amount
+            if Bearing.inShaftNo(iBearing) == iShaft
+                positionX = Bearing.positionOnShaftDistance(iBearing) + offsetPosition(iShaft);
+                position = [positionX, 0, 0];
+                
+                % 1. Find the shaft radius AT THIS MODE for the bearing hole
+                % This visualizes if the bearing is attached to the stiffness radius
+                bearingLoc = Bearing.positionOnShaftDistance(iBearing);
+                localShaftR = 0;
+                tempCursor = 0;
+                for k = 1:length(segLengths)
+                    if bearingLoc >= tempCursor && bearingLoc <= (tempCursor + segLengths(k))
+                        localShaftR = segOuterR(k); % Use ACTIVE radius
+                        if isnan(localShaftR), localShaftR = Shaft.outerRadius{iShaft}(k); end
+                        break;
+                    end
+                    tempCursor = tempCursor + segLengths(k);
+                end
+                if localShaftR == 0, localShaftR = max(segOuterR); end 
+                
+                % 2. Housing size (Visual only)
+                % Use actual geometry max radius to ensure housing is visible even if stiffness model is thin
+                maxShaftR_Phys = max(Shaft.outerRadius{iShaft}); 
+                if isempty(Disk.outerRadius)
+                    maxDiskR = 0;
+                else
+                    maxDiskR = max(Disk.outerRadius); 
+                end
+                
+                height = max(maxDiskR * 1.25, maxShaftR_Phys * 2.5);
+                width = height;
+                thickness = 0.01; 
+                if ~isempty(Disk.thickness), thickness = min(Disk.thickness) * 0.6; end
+                
+                RotateInfo.isRotate = true;
+                RotateInfo.oringin = [0,0,0];
+                RotateInfo.direction = [1,0,0];
+                RotateInfo.angle = 90;
+                
+                addTriangularBlock(ax_h, position, localShaftR, height, width, thickness, 15, 'x', RotateInfo);     
+            end 
+        end 
+        
+        % --- Lighting and Saving Individual Shafts ---
+        % Copy objects to composite figure
+        allObjs = findall(h, 'type','axes');
+        toCopy = allchild(allObjs);
+        copyobj(toCopy, wholeAxes);
+        
+        light(ax_h, 'Position', [-1 -1 1], 'Color', [0.8 0.8 1]); 
+        light(ax_h, 'Position', [1 1 1], 'Color', [1 0.9 0.8]);
+        lighting(ax_h, 'gouraud');
+        axis(ax_h, 'equal'); grid(ax_h, 'on'); view(ax_h, 3);
+        title(ax_h, [figTitlePrefix, ': Shaft ', num2str(iShaft)]);
+        
+        % Save individual shaft figure with Suffix
+        set(h,'Visible','off','CreateFcn','set(gcf,''Visible'',''on'')')
+        figureName{iShaft} = ['modelDiagram/diagramOfShaft',num2str(iShaft), fileSuffix, '.fig'];
+        savefig(h,figureName{iShaft})
+        pngName = ['modelDiagram/diagramOfShaft',num2str(iShaft), fileSuffix, '.png'];
+        saveas(h, pngName)
+        close(h)
+        
+    end % End Shaft Loop
 
-    % add light
-    light(ax_h, 'Position', [-0.5272   -0.6871    0.5000], 'Color', [0.8 0.8 1]);
-    light(ax_h, 'Position', [-0.5272   -0.6871    0.5000], 'Color', [1 0.9 0.8]);
-    lighting gouraud;
-    
-    % save figure for each shaft
-    set(h,'Visible','off','CreateFcn','set(gcf,''Visible'',''on'')')
-    figureName{iShaft} = ['modelDiagram/diagramOfShaft',num2str(iShaft),'.fig'];
-    savefig(h,figureName{iShaft})
-    pngName = ['modelDiagram/diagramOfShaft',num2str(iShaft),'.png'];
-    saveas(h, pngName)
-    close(h)
-    
-end % end for iShaft
+    % --- Finalize Composite Figure for this Mode ---
+    view(wholeAxes, 3); 
+    grid(wholeAxes, 'on');
+    axis(wholeAxes, 'equal');
+    xlabel(wholeAxes, 'X [m]'); ylabel(wholeAxes, 'Y [m]'); zlabel(wholeAxes, 'Z [m]');
+    title(wholeAxes, [figTitlePrefix, ': Whole System']);
 
-% Set axis properties for full model
-view(wholeAxes, 3); % 3D view
-grid(wholeAxes, 'on');
-axis(wholeAxes, 'equal');
+    light(wholeAxes, 'Position', [-1 -1 1], 'Color', [0.8 0.8 1]);
+    light(wholeAxes, 'Position', [1 1 1], 'Color', [1 0.9 0.8]);
+    lighting(wholeAxes, 'gouraud');
 
-% add light for full model
-light(wholeAxes, 'Position', [-0.5272   -0.6871    0.5000], 'Color', [0.8 0.8 1]);
-light(wholeAxes, 'Position', [-0.5272   -0.6871    0.5000], 'Color', [1 0.9 0.8]);
-lighting gouraud;
+    % Save composite figure with Suffix
+    set(wholeFig,'Visible','off','CreateFcn','set(gcf,''Visible'',''on'')')
+    savefig(wholeFig, ['modelDiagram/theWholeModel', fileSuffix, '.fig']);
+    saveas(wholeFig, ['modelDiagram/theWholeModel', fileSuffix, '.png']);
+    close(wholeFig);
 
-% Save composite figure
-set(wholeFig,'Visible','off','CreateFcn','set(gcf,''Visible'',''on'')')
-savefig(wholeFig, 'modelDiagram/theWholeModel.fig');
-saveas(wholeFig, 'modelDiagram/theWholeModel.png');
+end % End Mode Loop
 
-% Close composite figure
-close(wholeFig);
-
-% % save the whole figure
-% wholeFigure = CombFigs('theWholeModel',figureName(:));
-% savefig(wholeFigure,'modelDiagram/theWholeModel.fig')
-% saveas(wholeFigure,'modelDiagram/theWholeModel.png')
-% close(wholeFigure)
 end

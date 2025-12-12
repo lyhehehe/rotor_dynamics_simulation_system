@@ -1,8 +1,9 @@
 %% meshModel - Generate discretized finite element mesh for multi-shaft rotor systems
 %
 % This function creates a comprehensive nodal mesh structure for finite element
-% analysis of rotor-bearing systems with complex configurations. It handles
-% automatic mesh generation, key component identification, and DOF mapping.
+% analysis of rotor-bearing systems. It handles automatic mesh generation based
+% on shaft segmentation, identifies key components, assigns physical properties 
+% to elements, and manages DOF mapping.
 %
 %% Syntax
 %   Parameter = meshModel(InitialParameter)
@@ -11,30 +12,30 @@
 %
 %% Description
 % |meshModel| performs sophisticated mesh generation for rotor dynamics models:
-% * Automatically detects critical components (bearings, disks, etc.)
+% * Automatically detects critical points (segment boundaries, disks, bearings)
+% * Maps finite elements to specific shaft segments for property assignment
 % * Implements adaptive mesh refinement strategies
-% * Supports custom mesh specifications
 % * Establishes node-component relationships
 % * Manages degree-of-freedom (DOF) allocation
 %
 %% Input Arguments
 % * |InitialParameter| - System configuration structure containing:
 %   * |Shaft|: Shaft properties [struct array]
-%     .totalLength         % Length of each shaft [m] [nShafts×1]
-%     .dofOfEachNodes      % DOFs per node [scalar or nShafts×1]
+%     .totalLength         % Total length of each shaft [m]
+%     .segmentLength       % Lengths of distinct segments [cell array]
+%     .outerRadius         % Outer radii per segment [cell array]
+%     .innerRadius         % Inner radii per segment [cell array]
+%     .density             % Density per segment [cell array]
+%     .eccentricity        % Eccentricity per segment [cell array]
+%     .dofOfEachNodes      % DOFs per node
 %   * |Disk|: Disk parameters [struct array]
-%     .inShaftNo           % Parent shaft index [mDisks×1]
-%     .positionOnShaftDistance % Axial position [m] [mDisks×1]
+%     .inShaftNo           % Parent shaft index
+%     .positionOnShaftDistance % Axial position [m]
 %   * |Bearing|: Bearing parameters [struct array]
-%     .inShaftNo            % Parent shaft index [kBearings×1]
-%     .positionOnShaftDistance % Axial position [m] [kBearings×1]
+%     .inShaftNo            % Parent shaft index
+%     .positionOnShaftDistance % Axial position [m]
 %   * |ComponentSwitch|: Component activation flags [struct]
-%     .hasRubImpact         % Rub-impact activation [logical]
-%     .hasIntermediateBearing % Intermediate bearing flag [logical]
-%     .hasCouplingMisalignment % Coupling misalignment flag [logical]
-%     .hasLoosingBearing   % Bearing clearance flag [logical]
-%     .hasCustom           % Custom component flag [logical]
-%   * see also inputEssentialParameter(), inputBearingHertz(), inputInmediateBearing()
+%     .hasRubImpact, .hasIntermediateBearing, .hasLoosingBearing, etc.
 %
 % * |gridFineness| - Mesh resolution specification [string]:
 %   * |'low'|: Coarse mesh (default, 1 element between key nodes)
@@ -42,49 +43,43 @@
 %   * |'high'|: Fine mesh (10 elements between key nodes)
 %
 % * |manualGrid| - Custom mesh definition [cell array]:
-%   {n} = [e1 e2 ... em]  % Element counts per segment (divided by key nodes) for shaft n
+%   {n} = [e1 e2 ... em]  % Element counts per segment for shaft n
 %
 %% Output Structure
 % * |Parameter| - Enhanced system configuration with mesh data:
 %   * |Mesh|: Discretization results [struct]
 %     .nodeDistance        % Node positions per shaft [1×nShafts cell]
 %     .Node                % Node properties [nNodes×1 struct]:
-%       .name              % Node ID [integer]
-%       .onShaftNo         % Parent shaft index [integer]
-%       .onShaftDistance   % Axial position [m]
-%       .dof               % DOF count at node [integer]
-%       .diskNo            % Associated disk ID [integer]
-%       .bearingNo         % Associated bearing ID [integer]
-%       .isBearing         % Bearing node flag [logical]
-%       ... (additional component fields as applicable)
+%       .name, .onShaftNo, .onShaftDistance, .dof, .isBearing, etc.
+%     .ShaftElement        % Element-specific properties [nElements×1 struct]:
+%       .NodeNo            % Global node indices [NodeL, NodeR]
+%       .ShaftNo           % Parent shaft index
+%       .Length            % Element length
+%       .outerRadius       % Element outer radius
+%       .innerRadius       % Element inner radius
+%       .eccentricity      % Element eccentricity
+%       .eccentricityPhase % Element eccentricity phase
+%       .density, .elasticModulus, .poissonRatio
 %     .dofInterval        % DOF ranges [nNodes×2]
 %     .dofOnNodeNo         % Node mapping for DOFs [nDOFs×1]
-%     .nodeNum             % Total node count [integer]
-%     .dofNum              % Total DOF count [integer]
-%   * Updated component fields with node mappings:
-%     .Disk.positionOnShaftNode
-%     .Bearing.positionOnShaftNode
-%     .Bearing.positionNode
-%     ... (other components)
+%     .nodeNum             % Total node count
+%     .dofNum              % Total DOF count
+%   * Updated component fields with node mappings
 %
 %% Key Algorithms
 % 1. Key Node Identification:
-%    * Collects critical positions: shaft ends, disks, bearings, etc.
-%    * Implements proximity merging (L/5000 threshold)
+%    * Collects critical positions: Shaft segment boundaries, disks, bearings.
+%    * Implements proximity merging (L/5000 threshold).
 % 2. Mesh Segmentation:
-%    Automatic:
-%      * Uniform segmentation based on gridFineness level
-%    Manual:
-%      * Custom element counts per segment
-% 3. Node-Component Mapping:
-%    * Associates physical components with nearest node
-%    * Handles multi-shaft configurations
-% 4. DOF Management:
-%    * Creates DOF intervals for each node
-%    * Maintains DOF-node relationships
+%    * Subdivides shaft segments based on |gridFineness| or |manualGrid|.
+% 3. Property Mapping:
+%    * Matches generated finite elements to input shaft segments.
+%    * Assigns specific geometric (radii) and material (density, E) 
+%      properties to each element.
+% 4. Node-Component Mapping:
+%    * Associates physical components with nearest node.
 % 5. Special Component Handling:
-%    * Generates additional nodes for bearing masses
-%    * Flags loose bearing positions
+%    * Generates additional nodes for bearing masses.
 %
 %% Example
 % % Medium-resolution automatic mesh
@@ -94,18 +89,11 @@
 % manualGrid = {[3 2 4], [5 1]}; % Shaft1: 3|2|4 elements, Shaft2: 5|1
 % sysConfig = meshModel(baseParams, manualGrid);
 %
-% % Basic analysis mesh
-% sysConfig = meshModel(baseParams);
-%
 %% Implementation Notes
 % * Node Merging Threshold: L/5000 (L = shaft length)
-% * Component Mapping:
-%    - Disks: Point components at nodes
-%    - Bearings: May generate additional mass nodes
-%    - Intermediate Bearings: Special two-column mapping
-% * DOF Allocation:
-%    - Sequential DOF numbering across all nodes
-%    - Maintains DOF interval tracking
+% * Element Properties: Each finite element inherits properties (including
+%   eccentricity) from the specific shaft segment it resides in.
+% * Bearing Nodes: Bearings with mass generate additional system nodes.
 %
 %% See Also
 % establishModel
@@ -120,7 +108,7 @@ function Parameter = meshModel(varargin)
 % from other nodes to itself < totalLength/THRESHOLD_COEFFICIENT
 THRESHOLD_COEFFICIENT = 5000; 
 
-% recognize the input parameter
+% --- Input Parsing ---
 if isempty(varargin)
     error('Insufficient input parameters')
 else
@@ -137,7 +125,7 @@ switch length(varargin)
             isAutoMesh = true;
         elseif iscell(varargin{2})
             manualGrid = varargin{2};
-            isAutoMesh =false;
+            isAutoMesh = false;
         else
             error('Please input char or cell data for the second parameter')
         end
@@ -145,93 +133,88 @@ switch length(varargin)
         error('too much input parameter')
 end
 
-%%
-
-% check the initial parameter
 Shaft = InitialParameter.Shaft;
 Disk = InitialParameter.Disk;
 Bearing = InitialParameter.Bearing;
 
+% Component flags
 if InitialParameter.ComponentSwitch.hasRubImpact
-    RubImpact = InitialParameter.RubImpact;
-    hasRub = true;
+    RubImpact = InitialParameter.RubImpact; hasRub = true;
 else
-    hasRub = false;
+    hasRub = false; 
 end
 
 if InitialParameter.ComponentSwitch.hasIntermediateBearing
-    InterBearing = InitialParameter.IntermediateBearing;
-    hasInterBearing = true;
+    InterBearing = InitialParameter.IntermediateBearing; hasInterBearing = true;
 else
-    hasInterBearing = false;
+    hasInterBearing = false; 
 end
 
 if InitialParameter.ComponentSwitch.hasCouplingMisalignment
-    Coupling = InitialParameter.CouplingMisalignment;
-    hasCoupling = true;
+    Coupling = InitialParameter.CouplingMisalignment; hasCoupling = true;
 else
-    hasCoupling = false;
+    hasCoupling = false; 
 end
 
 if InitialParameter.ComponentSwitch.hasLoosingBearing
-    LoosingBearing = InitialParameter.LoosingBearing;
-    hasLoosingBearing = true;
+    LoosingBearing = InitialParameter.LoosingBearing; hasLoosingBearing = true;
 else
-    hasLoosingBearing = false;
+    hasLoosingBearing = false; 
 end
 
 if InitialParameter.ComponentSwitch.hasCustom
-    Custom = InitialParameter.Custom;
-    hasCustom = true;
+    Custom = InitialParameter.Custom; hasCustom = true;
 else
-    hasCustom = false;
+    hasCustom = false; 
 end
 
-%%
-
-% record key points on the shaft
+%% 1. Generate Key Points (Updated for Segmented Shafts)
 keyPoints = cell(Shaft.amount,1);
 
 for iShaft = 1:1:Shaft.amount
-    keyPoints{iShaft} = [0; Shaft.totalLength(iShaft)];
+    % --- NEW: Add Segment Endpoints as Key Points ---
+    % Get segment lengths for current shaft
+    segLengths = Shaft.segmentLength{iShaft};
+    % Calculate cumulative positions (0, L1, L1+L2, ...)
+    segmentBoundaries = [0; cumsum(segLengths(:))];
     
+    % Initialize keyPoints with segment boundaries
+    keyPoints{iShaft} = segmentBoundaries;
     
-    % record disk
+    % --- Add Component Locations ---
+    % Record disk
     position = find(Disk.inShaftNo == iShaft);
     keyPointsDisk = Disk.positionOnShaftDistance(position);
     
-    
-    % record bearing 
+    % Record bearing 
     position = find(Bearing.inShaftNo == iShaft);
     keyPointsBearing = Bearing.positionOnShaftDistance(position);
     
-    % record rub
+    % Record rub
     if hasRub
         position = find(RubImpact.inShaftNo == iShaft);
         keyPointsRub = RubImpact.positionOnShaftDistance(position);
     else
-        keyPointsRub = [];
+        keyPointsRub = []; 
     end
     
-    
-    % record intermediate bearing
+    % Record intermediate bearing
     if hasInterBearing
         position = find(InterBearing.betweenShaftNo == iShaft);
         keyPointsInterBearing = InterBearing.positionOnShaftDistance(position);
-    else
-        keyPointsInterBearing = [];
+    else 
+        keyPointsInterBearing = []; 
     end
-
-    % record Customize function
+    
+    % Record Customize function
     if hasCustom
         position = find(Custom.inShaftNo == iShaft);
         keyPointsCustom = Custom.positionOnShaftDistance(position);
-    else
-        keyPointsCustom = [];
+    else 
+        keyPointsCustom = []; 
     end
     
-    
-    % assembling
+    % --- Assemble and Sort ---
     keyPoints{iShaft} = sort([  keyPoints{iShaft};...
                                 keyPointsDisk;...
                                 keyPointsRub;...
@@ -239,68 +222,54 @@ for iShaft = 1:1:Shaft.amount
                                 keyPointsBearing; ...
                                 keyPointsCustom]);
           
-                          
-    % merge the same value (or too close) in keyPoints
+    % --- Merge Close Points ---
     ii = 1;
-    while ii<length(keyPoints{iShaft})
+    totalL = Shaft.totalLength(iShaft);
+    while ii < length(keyPoints{iShaft})
         distance = abs( keyPoints{iShaft}(ii) - keyPoints{iShaft}(ii+1) );
-        isTooClose = distance < Shaft.totalLength(iShaft)/THRESHOLD_COEFFICIENT;
+        isTooClose = distance < totalL/THRESHOLD_COEFFICIENT;
         if isTooClose
+            % Remove the one that IS NOT a segment boundary if possible?
+            % For simplicity, we remove the second one. 
+            % Ideally, check if one is a hard geometry constraint.
             keyPoints{iShaft}(ii+1) = [];
         else
             ii = ii + 1;
-        end % end if
-    end % end while
+        end 
+    end 
+end 
 
-end % end for iShaft = 1:1:Shaft.amount
-
-%%
-
-% check the meshing parameter
+%% 2. Check Meshing Parameters
 if isAutoMesh
-    
     switch gridFineness
-        case 'low' 
-            FINENESS = 1;
-        case 'middle'
-            FINENESS = 4;
-        case 'high'
-            FINENESS = 10;
-        otherwise
-            error('Please input: low, middle or high at the second parameter')
-    end % end switch
-    
+        case 'low', FINENESS = 1;
+        case 'middle', FINENESS = 4;
+        case 'high', FINENESS = 10;
+        otherwise, error('Please input: low, middle or high')
+    end 
 else
-    
     for iShaft = 1:1:Shaft.amount
         isMatch = length(manualGrid{iShaft}) == ( length(keyPoints{iShaft}) - 1 );
         if ~isMatch
-            error(['the dimension of manual grid is not matched with',...
-                   'segments. Please use auto mesh and check the number of segments'])
-        end % end if
-    end % end for iShaft
-    
-end % end if
+            error(['Manual grid dimension mismatch. Segments: ', num2str(length(keyPoints{iShaft}) - 1)]);
+        end 
+    end 
+end 
 
-%%
-
-% mesh
+%% 3. Perform Meshing (Generate Nodes)
 rowSegmentNum = zeros(Shaft.amount,1);
 nodeDistance = cell(Shaft.amount,1);
+
 for iShaft = 1:1:Shaft.amount
-    % calculate the number of segments for each shaft
     rowSegmentNum(iShaft) = length(keyPoints{iShaft}) - 1; 
     
     if isAutoMesh
-        % calculate the number of elements for each segment
         standardLength = Shaft.totalLength(iShaft)/ FINENESS;
         elementNum = ceil( diff(keyPoints{iShaft}) ./ standardLength );
     else
         elementNum = manualGrid{iShaft};
     end
     
-    
-    % get the distance from left end of the shaft to each node 
     nodeDistance{iShaft} = [];
     for iSegment = 1:1:rowSegmentNum(iShaft)
         nodesInSegment = linspace( keyPoints{iShaft}(iSegment),...
@@ -309,111 +278,124 @@ for iShaft = 1:1:Shaft.amount
         nodeDistance{iShaft} = [nodeDistance{iShaft}, nodesInSegment];
     end
     
-    
-    % merge the same value
     nodeDistance{iShaft} = unique(nodeDistance{iShaft});
-    
-end % end for iShaft = 1:1:Shaft.amount
+end 
 
-%%
-
-% generate a new struct saving the information of each node: Node
+%% 4. Generate Node Structure
 nodeNum = sum( cellfun(@length,nodeDistance) );
-Node = struct(  'name',             cell(nodeNum,1),...
-                'onShaftNo',        [],...
-                'onShaftDistance',  [],...
-                'diskNo',           [],...
-                'bearingNo',        [],...
-                'isBearing',        [],...
-                'dof',              [] ); %initial
+Node = struct('name', cell(nodeNum,1), 'onShaftNo', [], 'onShaftDistance', [],...
+              'diskNo', [], 'bearingNo', [], 'isBearing', [], 'dof', []);
 
-for iNode = 1:1:nodeNum
-    if hasRub
-        [Node(iNode).rubImpactNo] = [];
-    end
-
-    if hasInterBearing
-        Node(iNode).interBearingNo = [];
-    end
-
-    if hasCoupling
-        Node(iNode).couplingNo = [];
-    end
-    
-    if hasLoosingBearing
-        Node(iNode).isLoosingBearing = [];
-    end
-
-    if hasCustom
-        [Node(iNode).CustomNo] = [];
-    end
+% Initialize optional fields
+for iNode = 1:nodeNum
+    if hasRub, Node(iNode).rubImpactNo = []; end
+    if hasInterBearing, Node(iNode).interBearingNo = []; end
+    if hasCoupling, Node(iNode).couplingNo = []; end
+    if hasLoosingBearing, Node(iNode).isLoosingBearing = []; end
+    if hasCustom, Node(iNode).CustomNo = []; end
 end
-
  
-% check every node            
 iShaft = 1;
 previousShaftNodeNum = 0;
 for iNode = 1:1:nodeNum
     Node(iNode).name = iNode;
-    
-    % Node.onShaftNo and Node.onShaftDistance
     Node(iNode).onShaftNo = iShaft;
     distanceHere = nodeDistance{iShaft}(iNode - previousShaftNodeNum);
     Node(iNode).onShaftDistance = distanceHere;
     Node(iNode).dof = Shaft.dofOfEachNodes(iShaft);
     
-    % judge if the shaft is end
     [previousShaftNodeNum, iShaft] = judgeShaftEnd(previousShaftNodeNum,...
                                      nodeDistance, iShaft, iNode); 
-end % end for iNode
+end 
 
-%%
+%% 5. NEW: Generate ShaftElement Structure
+% This structure stores physical properties for each finite element
+currentElemIdx = 0;
+shaftElementNum = nodeNum-Shaft.amount;
+ShaftElement(shaftElementNum) = struct();
 
-% Node.diskNo and Disk.positionOnShaftNode
-[Disk,Node] = matchElement(Disk, 'disk', Node, nodeDistance,nodeNum,...
-              THRESHOLD_COEFFICIENT, Shaft);
-           
-%%
-
-% Node.bearingNo and Bearing.positionOnShaftNode
-[Bearing,Node] = matchElement(Bearing, 'bearing', Node, nodeDistance,nodeNum,...
-                 THRESHOLD_COEFFICIENT, Shaft);
-
-%%
-
-% Node.rubImpactNo and RubImpact.positionOnShaftNode
-if hasRub
-    [RubImpact,Node] = matchElement(RubImpact, 'rubImpact', Node,...
-                       nodeDistance,nodeNum,THRESHOLD_COEFFICIENT, Shaft);
+for iShaft = 1:Shaft.amount
+    nodes = nodeDistance{iShaft};
+    numElemsInShaft = length(nodes) - 1;
+    
+    % Input Properties for this shaft (Cell Arrays)
+    inSegLengths  = Shaft.segmentLength{iShaft};
+    inOuterR      = Shaft.outerRadius{iShaft};
+    inInnerR      = Shaft.innerRadius{iShaft};
+    inOuterRStiff = Shaft.outerRadiusStiff{iShaft};
+    inInnerRStiff = Shaft.innerRadiusStiff{iShaft};
+    inDensity     = Shaft.density{iShaft};
+    inE           = Shaft.elasticModulus{iShaft};
+    inPoisson     = Shaft.poissonRatio{iShaft};
+    inEcc         = Shaft.eccentricity{iShaft};
+    inEccPhase    = Shaft.eccentricityPhase{iShaft};
+    
+    % Compute boundaries of input segments for lookup
+    inSegBoundaries = [0; cumsum(inSegLengths(:))];
+    
+    % Global Node Offset for this shaft
+    % (Calculate how many nodes existed before this shaft)
+    nodeOffset = 0;
+    for k = 1:(iShaft-1)
+        nodeOffset = nodeOffset + length(nodeDistance{k});
+    end
+    
+    for j = 1:numElemsInShaft
+        currentElemIdx = currentElemIdx + 1;
+        
+        % Identify Nodes
+        nodeL = nodeOffset + j;     % Global Node ID Left
+        nodeR = nodeOffset + j + 1; % Global Node ID Right
+        
+        % Element Geometry
+        zL = nodes(j);
+        zR = nodes(j+1);
+        L_elem = zR - zL;
+        zMid = (zL + zR) / 2;
+        
+        % Lookup: Which Input Segment contains zMid?
+        % Since we forced segment boundaries into KeyPoints, zMid is guaranteed
+        % to be inside exactly one segment.
+        % Find k where inSegBoundaries(k) <= zMid < inSegBoundaries(k+1)
+        % Using 'histcounts' or logical indexing
+        segIdx = find(zMid >= inSegBoundaries(1:end-1) - 1e-9 & ...
+                      zMid <= inSegBoundaries(2:end) + 1e-9, 1, 'first');
+        
+        if isempty(segIdx)
+            error('Meshing Error: Element midpoint not found in any segment.');
+        end
+        
+        % Fill ShaftElement Data
+        ShaftElement(currentElemIdx).NodeNo = [nodeL, nodeR];
+        ShaftElement(currentElemIdx).ShaftNo = iShaft;
+        ShaftElement(currentElemIdx).Length = L_elem;
+        
+        % Properties from Input Segment
+        ShaftElement(currentElemIdx).outerRadius = inOuterR(segIdx);
+        ShaftElement(currentElemIdx).innerRadius = inInnerR(segIdx);
+        
+        % Stiffness Radius Logic (Use stored value, standardize function ensures existence)
+        ShaftElement(currentElemIdx).outerRadiusStiff = inOuterRStiff(segIdx);
+        ShaftElement(currentElemIdx).innerRadiusStiff = inInnerRStiff(segIdx);
+        
+        ShaftElement(currentElemIdx).density = inDensity(segIdx);
+        ShaftElement(currentElemIdx).elasticModulus = inE(segIdx);
+        ShaftElement(currentElemIdx).poissonRatio = inPoisson(segIdx);
+        
+        ShaftElement(currentElemIdx).eccentricity = inEcc(segIdx);
+        ShaftElement(currentElemIdx).eccentricityPhase = inEccPhase(segIdx);
+    end
 end
 
-%%
+%% 6. Match Components to Nodes (Existing Logic)
+[Disk,Node] = matchElement(Disk, 'disk', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft);
+[Bearing,Node] = matchElement(Bearing, 'bearing', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft);
+if hasRub, [RubImpact,Node] = matchElement(RubImpact, 'rubImpact', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); end
+if hasCoupling, [Coupling,Node] = matchElement(Coupling, 'couplingMisalignment', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); end
+if hasInterBearing, [InterBearing,Node] = matchElement(InterBearing, 'interBearing', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); end
+if hasCustom, [Custom,Node] = matchElement(Custom, 'custom', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); end
 
-% Node.couplingNo and Coupling.positionOnShaftNode
-if hasCoupling
-    [Coupling,Node] = matchElement(Coupling, 'couplingMisalignment', Node,...
-                      nodeDistance,nodeNum,THRESHOLD_COEFFICIENT, Shaft);
-end
-
-%%
-
-% Node.interBearingNo and InterBearing.positionOnShaftNode
-if hasInterBearing
-    [InterBearing,Node] = matchElement(InterBearing, 'interBearing', Node,...
-                          nodeDistance,nodeNum,THRESHOLD_COEFFICIENT, Shaft);
-end
-
-%%
-
-% Node.customNo and Custom.positionOnShaftNode
-if hasCustom
-    [Custom,Node] = matchElement(Custom, 'custom', Node,...
-                       nodeDistance,nodeNum,THRESHOLD_COEFFICIENT, Shaft);
-end
-
-%%
-
-% Node.isLoosingBearing
+%% 7. Handle Loosing Bearing
 if hasLoosingBearing
     loosingBearingIndex = LoosingBearing.inBearingNo;
     loosingNode = Bearing.positionOnShaftNode(loosingBearingIndex);
@@ -425,26 +407,16 @@ if hasLoosingBearing
     end
 end
 
-
-%%
-
-% Node.isBearing and Bearing.positionNode
-% generater bearing nodes
+%% 8. Add Bearing Nodes (Append to list)
 isInter = false;
 [nodeNum, Bearing, Node] = addNode(nodeNum, Bearing, Node, hasLoosingBearing, isInter);
 
-%%
-
-% Node.isInterBearing and InterBearing.positionNode
-% generater bearing nodes
 if hasInterBearing
     isInter = true;
     [nodeNum, InterBearing, Node] = addNode(nodeNum, InterBearing, Node, hasLoosingBearing, isInter);
 end
 
-%%
-
-% Mesh.dofInterval
+%% 9. DOF Calculation
 dofOfEachNode = [Node.dof];
 dofInterval = zeros(nodeNum,2);
 for iNode = 1:1:nodeNum
@@ -453,9 +425,6 @@ for iNode = 1:1:nodeNum
     dofInterval(iNode,:) = [startDof, endDof];
 end
 
-%%
-
-% Mesh.dofOnNodeNo
 dofOnNodeNo = zeros(sum([Node.dof]),1);
 dofNo = 1;
 for iNode = 1:1:nodeNum
@@ -465,14 +434,12 @@ for iNode = 1:1:nodeNum
     end
 end
 
-%% 
-
-% output
+%% 10. Output Packaging
 Parameter = InitialParameter;
 
-
-% output struct: Mesh
+% Mesh Output
 Mesh.Node = Node;
+Mesh.ShaftElement = ShaftElement; % NEW FIELD
 Mesh.keyPointsDistance = keyPoints;
 Mesh.nodeDistance = nodeDistance;
 Mesh.nodeNum = nodeNum;
@@ -481,178 +448,88 @@ Mesh.dofOnNodeNo = dofOnNodeNo;
 Mesh.dofInterval = dofInterval;
 Parameter.Mesh = Mesh;
 
-
-%output the node position of every important elements
+% Component Output
 Parameter.Disk = Disk;
 Parameter.Bearing = Bearing;
+if hasRub, Parameter.RubImpact = RubImpact; end
+if hasCoupling, Parameter.CouplingMisalignment = Coupling; end
+if hasInterBearing, Parameter.IntermediateBearing = InterBearing; end
+if hasCustom, Parameter.Custom = Custom; end
 
-if hasRub
-    Parameter.RubImpact = RubImpact;
 end
 
-if hasCoupling
-    Parameter.CouplingMisalignment = Coupling;
-end
+%% Subfunctions (Unchanged Logic, Included for completeness)
 
-if hasInterBearing
-    Parameter.IntermediateBearing = InterBearing;
-end
-
-if hasCustom
-    Parameter.Custom = Custom;
-end
-
-
-%% subfunction 1: matchElement
-
-% write the node information into important elements (e.g. Disk, Bearing)
-% and the struct Node
 function [Element,Node] = matchElement(Element, elementName, Node,...
                           nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft)
-            
-if strcmp(elementName,'interBearing')
-    columnNum = 2;
-else
-    columnNum = 1;
-end
-
-Element.positionOnShaftNode = zeros(Element.amount,columnNum);    
-shaftNo = 1;
-previousShaftNode = 0;
-iElement = 1;
-for nodeNo = 1:1:nodeNum
-    % calculate the distance at nodeNo
-    distanceH = nodeDistance{shaftNo}(nodeNo - previousShaftNode);
-    
-    
-    % judge if this node has important element (e.g. disk, bearing)
+    if strcmp(elementName,'interBearing'), columnNum = 2; else, columnNum = 1; end
+    Element.positionOnShaftNode = zeros(Element.amount,columnNum);    
+    shaftNo = 1; previousShaftNode = 0; iElement = 1;
+    for nodeNo = 1:1:nodeNum
+        distanceH = nodeDistance{shaftNo}(nodeNo - previousShaftNode);
+        if strcmp(elementName,'interBearing'), isShaftHere = shaftNo == Element.betweenShaftNo;
+        else, isShaftHere = shaftNo == Element.inShaftNo; end
+        
+        isDistanceHere = abs(distanceH - Element.positionOnShaftDistance) < Shaft.totalLength(shaftNo)/THRESHOLD_COEFFICIENT;
+        isElementHere = isShaftHere & isDistanceHere; 
+        isElementHereNum = length(isElementHere(isElementHere == true));
+        
+        if isElementHereNum == 1 
+            indexElement = find(isElementHere == true);
+            Element.positionOnShaftNode(indexElement) = nodeNo;
+            switch elementName
+                case 'disk', Node(nodeNo).diskNo = iElement;
+                case 'bearing', Node(nodeNo).bearingNo = iElement;
+                case 'rubImpact', Node(nodeNo).rubImpactNo = iElement;
+                case 'couplingMisalignment', Node(nodeNo).couplingNo = iElement;
+                case 'custom', Node(nodeNo).customNo = iElement;
+                case 'interBearing'
+                    if sum(isElementHere(:,1)) == 1, Node(nodeNo).interBearingNo = iElement; 
+                    else, iElement = iElement - 1; end 
+            end 
+            iElement = iElement +1;
+        elseif isElementHereNum > 1 
+            error('Distance between elements too close, adjust THRESHOLD_COEFFICIENT.');
+        end 
+        [previousShaftNode, shaftNo] = judgeShaftEnd(previousShaftNode, nodeDistance, shaftNo, nodeNo);
+    end 
     if strcmp(elementName,'interBearing')
-        isShaftHere = shaftNo == Element.betweenShaftNo;
-    else
-        isShaftHere = shaftNo == Element.inShaftNo;
-    end
-    isDistanceHere = abs(distanceH - Element.positionOnShaftDistance)...
-                     < Shaft.totalLength(shaftNo)/THRESHOLD_COEFFICIENT;
-    isElementHere = isShaftHere & isDistanceHere; % logical matrix
-    isElementHereNum = length(isElementHere(isElementHere == true));
-
-    
-    % write the information into Element and Node
-    if isElementHereNum == 1 % there is a single disk on this position
-        
-        % Element.positionOnShaftNode 
-        indexElement = find(isElementHere == true);
-        Element.positionOnShaftNode(indexElement) = nodeNo;
-        
-        % Node.xxxxNo
-        switch elementName
-            case 'disk'
-                Node(nodeNo).diskNo = iElement;
-            case 'bearing'
-                Node(nodeNo).bearingNo = iElement;
-            case 'rubImpact'
-                Node(nodeNo).rubImpactNo = iElement;
-            case 'couplingMisalignment'
-                Node(nodeNo).couplingNo = iElement;
-            case 'custom'
-                Node(nodeNo).customNo = iElement;
-            case 'interBearing'
-                % only write the interBearing No. of 1st column of interBearing
-                if sum(isElementHere(:,1)) == 1 
-                    Node(nodeNo).interBearingNo = iElement; 
-                else
-                    iElement = iElement - 1;
-                end % end if
-            otherwise
-                error('wrong elementName in matchElement()')
-        end % end switch
-        
-        iElement = iElement +1;
-        
-    elseif isElementHereNum > 1 % there are too many disks on this position
-       
-        error(['the distance between disks is too close, please modify the',...
-               'THRESHOLD_COEFFICIENT in meshModel() or redefine the position of disks']);
-
-    end % end if isElementHereNum == 1
-    
-    
-    % judge if the shaft is end
-    [previousShaftNode, shaftNo] = judgeShaftEnd(previousShaftNode,...
-                                   nodeDistance, shaftNo, nodeNo);
-
-end % end for 
-
-
-% write the interBearing No. of 2nd column of interBearing
-if strcmp(elementName,'interBearing')
-        index1Column = Element.positionOnShaftNode(:,1);
-        index2Column = Element.positionOnShaftNode(:,2);
+        index1Column = Element.positionOnShaftNode(:,1); index2Column = Element.positionOnShaftNode(:,2);
         for iInterBearing = 1:1:length(index1Column)
             Node(index2Column(iInterBearing)).interBearingNo = Node(index1Column(iInterBearing)).interBearingNo;
         end
-end % end if
+    end 
+end 
 
-end % end subfunction matchElement()
+function [previousShaftNodeNum, iShaft] = judgeShaftEnd(previousShaftNodeNum, nodeDistance, iShaft, iNode)
+    isShaftEnd = iNode == (previousShaftNodeNum + length(nodeDistance{iShaft}) );
+    if isShaftEnd
+        previousShaftNodeNum = previousShaftNodeNum + length(nodeDistance{iShaft});
+        iShaft = iShaft +1;
+    end 
+end 
 
-%% subfunction 2: judgeShaftEnd
-
-% judge if this node is the end of the shaft. true -> iShift +1 and
-% previousShaftNodeNum + the number of nodes last shaft having
-function [previousShaftNodeNum, iShaft]...
-        = judgeShaftEnd(previousShaftNodeNum, nodeDistance, iShaft, iNode)
-
-isShaftEnd = iNode == (previousShaftNodeNum +...
-                   length(nodeDistance{iShaft}) );
-if isShaftEnd
-    previousShaftNodeNum = previousShaftNodeNum +...
-                           length(nodeDistance{iShaft});
-    iShaft = iShaft +1;
-end % end if
-
-end % end sub function judgeShaftEnd()
-
-%% subfunction 3: addNode
-
-% add Node.isInterBearing and InterBearing.positionNode, Node.isBearing and
-% Bearing.positionNode for Bearing and InterBearing
 function [nodeNum, Element, Node] = addNode(nodeNum, Element, Node, hasLoosingBearing, isInter)
-indexHasMass = find(Element.mass' ~= 0); % index in 1-d
-[indexHasMassRow, indexHasMassCol] = find(Element.mass' ~= 0); % index in 2-d
-bearingNodeNum = length(indexHasMass);
-bearingMassColumnNum = size(Element.mass,2);
-Element.positionNode = zeros(Element.amount,bearingMassColumnNum); % initial
-for iBearingNode = 1:1:bearingNodeNum
-    newNodeNo = nodeNum + iBearingNode;
-    onNodeNo = Element.positionOnShaftNode(indexHasMassCol(iBearingNode),:);
-    % copy information in Node
-    Node(newNodeNo).onShaftNo = [Node(onNodeNo).onShaftNo];
-    Node(newNodeNo).onShaftDistance = [Node(onNodeNo).onShaftDistance];
-    
-    if isInter
-        Node(newNodeNo).interBearingNo = unique([Node(onNodeNo).interBearingNo]);
-    else
-        Node(newNodeNo).bearingNo = Node(onNodeNo).bearingNo;
+    indexHasMass = find(Element.mass' ~= 0); 
+    [indexHasMassRow, indexHasMassCol] = find(Element.mass' ~= 0); 
+    bearingNodeNum = length(indexHasMass);
+    bearingMassColumnNum = size(Element.mass,2);
+    Element.positionNode = zeros(Element.amount,bearingMassColumnNum); 
+    for iBearingNode = 1:1:bearingNodeNum
+        newNodeNo = nodeNum + iBearingNode;
+        onNodeNo = Element.positionOnShaftNode(indexHasMassCol(iBearingNode),:);
+        Node(newNodeNo).onShaftNo = [Node(onNodeNo).onShaftNo];
+        Node(newNodeNo).onShaftDistance = [Node(onNodeNo).onShaftDistance];
+        if isInter, Node(newNodeNo).interBearingNo = unique([Node(onNodeNo).interBearingNo]);
+        else, Node(newNodeNo).bearingNo = Node(onNodeNo).bearingNo; end
+        if hasLoosingBearing, Node(newNodeNo).isLoosingBearing = Node(onNodeNo).isLoosingBearing; end
+        Node(newNodeNo).name = newNodeNo; 
+        Node(newNodeNo).dof = Element.dofOfEachNodes(indexHasMassCol(iBearingNode),indexHasMassRow(iBearingNode));
+        Node(newNodeNo).isBearing = true;
+        Element.positionNode(indexHasMassCol(iBearingNode),indexHasMassRow(iBearingNode)) = newNodeNo;
     end
-    
-    if hasLoosingBearing
-        Node(newNodeNo).isLoosingBearing = Node(onNodeNo).isLoosingBearing;
+    for iNodee = 1:1:nodeNum
+        if isempty(Node(iNodee).isBearing), Node(iNodee).isBearing = false; end
     end
-    % write new information in Node
-    Node(newNodeNo).name = newNodeNo; 
-    Node(newNodeNo).dof = Element.dofOfEachNodes(indexHasMassCol(iBearingNode),indexHasMassRow(iBearingNode));
-    Node(newNodeNo).isBearing = true;
-    % Element.positionNode
-    Element.positionNode(indexHasMassCol(iBearingNode),indexHasMassRow(iBearingNode)) = newNodeNo;
+    nodeNum = nodeNum + bearingNodeNum;
 end
-
-
-for iNodee = 1:1:nodeNum
-    if isempty(Node(iNodee).isBearing)
-        Node(iNodee).isBearing = false;
-    end
-end
-nodeNum = nodeNum + bearingNodeNum;
-    
-end
-end % end main function
