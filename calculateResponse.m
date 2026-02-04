@@ -106,8 +106,8 @@ arguments % name value pair
     NameValueArgs.isPlotStatus = true; 
     NameValueArgs.reduceInterval = 1;
     NameValueArgs.calculateMethod = 'RK';
-    
     NameValueArgs.options = odeset();
+    NameValueArgs.isUseMassMatrix = false;
     NameValueArgs.isUseBalanceAsInitial = false;
     NameValueArgs.isFreshInitial = false
 end
@@ -165,42 +165,69 @@ else
 end % end if
 
 
+% update the ode options
+ode_opt = NameValueArgs.options;
+if NameValueArgs.isUseMassMatrix
+    % Original system is second-order: M * q'' + C*q' + K*q = f
+    % ODE solvers expect first-order system M_full * y' = f_full,
+    % where y = [q; q'], so construct mass matrix for first-order form:
+    % M_full = [I, 0; 0, M]
+    dof = Parameter.Mesh.dofNum;
+    M = Parameter.Matrix.mass; % assume sparse mass matrix (dof x dof)
+    % Ensure M is sparse and correct size
+    if ~issparse(M)
+        M = sparse(M);
+    end
+    I = speye(dof);
+    % construct block-diagonal mass matrix (sparse)
+    mass_full = blkdiag(I, M);
+    % set odeset Mass option
+    mass_opt = odeset('Mass', mass_full);
+    ode_opt = odeset(mass_opt, ode_opt);
+end
+
+
 convergenceStr = [];
+
+% create unified odefun depending on mass usage
+if NameValueArgs.isUseMassMatrix
+    odefun_no_mass = @(tn, yn) [yn(dofNum+1:end); dynamicEquationNoMass(tn, yn(1:dofNum), yn(dofNum+1:end), Parameter)];
+    odefun = odefun_no_mass;
+else
+    odefun_with_mass = @(tn, yn) [yn(dofNum+1:end); dynamicEquation(tn, yn(1:dofNum), yn(dofNum+1:end), Parameter)];
+    odefun = odefun_with_mass;
+end
+
 % calculate with classic Runge-Kutta Method
 if strcmp(NameValueArgs.calculateMethod, 'RK')
     q = zeros(dofNum, tNum); % for saving response
     dq = zeros(dofNum, tNum);
-    equation = @(tn,yn,dyn)dynamicEquation(tn,yn,dyn,Parameter);
+    equation = @(tn,yn,dyn) dynamicEquation(tn,yn,dyn,Parameter);
     % calculate response
-    for iT = 1:1:tNum
+    for iT = 1:tNum
         [q(:,iT), dq(:,iT)] = rungeKutta(equation, t(iT), yn, dyn, step);
         yn = q(:,iT);
         dyn = dq(:,iT);
-        if isnan(dyn)
+        if any(isnan(dyn))
             convergenceStr = ['t=', num2str(t(iT)), 's non-convergent'];
+            q = q(:,1:iT); dq = dq(:,1:iT); t = t(1:iT);
             break
-        end % end if isnan
-    end % end for iT
-elseif strcmp(NameValueArgs.calculateMethod, 'ode45') % use ode45 as solver
-    odefun = @(tn, yn) [yn(dofNum+1:end, 1); dynamicEquation(tn,yn(1:dofNum, 1), yn(dofNum+1:end, 1), Parameter)];
-    [~, yode] = ode45(odefun, t, [yn; dyn], NameValueArgs.options);
-    yode = yode';
-    q = yode(1:dofNum, :);
-    dq = yode(dofNum+1:end, :);
-elseif strcmp(NameValueArgs.calculateMethod, 'ode15s') % use ode15s as solver
-    odefun = @(tn, yn) [yn(dofNum+1:end, 1); dynamicEquation(tn,yn(1:dofNum, 1), yn(dofNum+1:end, 1), Parameter)];
-    [~, yode] = ode15s(odefun, t, [yn; dyn], NameValueArgs.options);
-    yode = yode';
-    q = yode(1:dofNum, :);
-    dq = yode(dofNum+1:end, :);
-elseif strcmp(NameValueArgs.calculateMethod, 'ode23s') % use ode23s as solver
-    odefun = @(tn, yn) [yn(dofNum+1:end, 1); dynamicEquation(tn,yn(1:dofNum, 1), yn(dofNum+1:end, 1), Parameter)];
-    [~, yode] = ode23s(odefun, t, [yn; dyn], NameValueArgs.options);
+        end
+    end
+elseif any(strcmp(NameValueArgs.calculateMethod, {'ode45','ode15s','ode23s'}))
+    % select solver function handle
+    switch NameValueArgs.calculateMethod
+        case 'ode45', solver = @ode45;
+        case 'ode15s', solver = @ode15s;
+        case 'ode23s', solver = @ode23s;
+    end
+    % integrate
+    [~, yode] = solver(odefun, t, [yn; dyn], ode_opt);
     yode = yode';
     q = yode(1:dofNum, :);
     dq = yode(dofNum+1:end, :);
 else
-    error('Error: wrong nameValue, please use RK or ode45 or ode15s.')
+    error('Error: wrong nameValue, please use RK or ode45 or ode15s or ode23s.')
 end % end if NameValueArgs.calculateMethod
 
 %%

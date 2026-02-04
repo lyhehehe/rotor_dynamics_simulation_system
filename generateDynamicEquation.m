@@ -550,10 +550,69 @@ functionEnd = [...
 ];
 fprintf(dq,'%s\n',functionEnd);
 
+
 %%
-% close .txt and transfer .txt -> .m
+% Close the currently open fprintf stream to flush writes temporarily
 fclose(dq);
+% transfer .txt -> .m
 system('rename dynamicEquation.txt dynamicEquation.m');
+
+%%
+% based on the original dynamicEquation, create a new version without mass
+% matrix for ode() solver in matlab to accelerate calculation 
+
+% Read the just-written text file
+txtName = 'dynamicEquation.m';
+fid = fopen(txtName, 'r');
+if fid == -1
+    error('Could not open %s for reading.', txtName);
+end
+fileLines = textscan(fid, '%s', 'Delimiter', '\n', 'Whitespace', '');
+fclose(fid);
+fileLines = fileLines{1};
+
+% Define the two target line patterns to find and modify.
+pattern1 = 'M = Parameter.Matrix.mass;'; % the line reading mass matrix
+pattern2 = 'ddyn = M \ rhs;'; % the line doing inv(M)
+
+% Prepare replacement lines
+replacement1 = '';
+replacement2 = 'ddyn = rhs;';
+
+% Find indices of lines matching the patterns (exact match)
+idx1 = find(strcmp(strtrim(fileLines), pattern1), 1);
+idx2 = find(strcmp(strtrim(fileLines), pattern2), 1);
+
+% Create modified copy of fileLines
+modifiedLines = fileLines;
+if ~isempty(idx1)
+    modifiedLines{idx1} = replacement1;
+end
+if ~isempty(idx2)
+    modifiedLines{idx2} = replacement2;
+end
+
+% replace all occurrences of the substring 'dynamicEquation'
+% with 'dynamicEquationNoMass' throughout the file content.
+for k = 1:numel(modifiedLines)
+    modifiedLines{k} = strrep(modifiedLines{k}, 'dynamicEquation', 'dynamicEquationNoMass');
+end
+
+% Write modifiedLines to a new .m file
+modifiedName = 'dynamicEquationNoMass.m';
+% check the exist of dynamic equation and create .txt
+if isfile(modifiedName)
+    delete(modifiedName)
+end
+% create new .m file
+fidMod = fopen(modifiedName, 'w');
+if fidMod == -1
+    error('Could not open %s for writing.', modifiedName);
+end
+for k = 1:numel(modifiedLines)
+    fprintf(fidMod, '%s\n', modifiedLines{k});
+end
+fclose(fidMod);
 
 
 end % end function
