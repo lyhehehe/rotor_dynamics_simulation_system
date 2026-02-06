@@ -108,6 +108,8 @@ arguments % name value pair
     NameValueArgs.calculateMethod = 'RK';
     NameValueArgs.options = odeset();
     NameValueArgs.isUseMassMatrix = false;
+    NameValueArgs.isUseJacobian = false;
+    NameValueArgs.customJacobianFun = @(yn, dyn, tn, omega, domega, ddomega, Parameter) customForceJacobian(yn, dyn, tn, omega, domega, ddomega, Parameter)
     NameValueArgs.isUseBalanceAsInitial = false;
     NameValueArgs.isFreshInitial = false
 end
@@ -167,6 +169,8 @@ end % end if
 
 % update the ode options
 ode_opt = NameValueArgs.options;
+
+% enable mass matrix function in ode() solver
 if NameValueArgs.isUseMassMatrix
     % Original system is second-order: M * q'' + C*q' + K*q = f
     % ODE solvers expect first-order system M_full * y' = f_full,
@@ -184,6 +188,25 @@ if NameValueArgs.isUseMassMatrix
     % set odeset Mass option
     mass_opt = odeset('Mass', mass_full);
     ode_opt = odeset(mass_opt, ode_opt);
+end
+
+% enable Jacobian matrix in ode() solver
+if NameValueArgs.isUseJacobian
+    % save jacobian matrix of customize force in Parameter
+    if Parameter.ComponentSwitch.hasCustom
+        Parameter.Custom.jacobian = NameValueArgs.customJacobianFun;
+    end
+    % construct full jacobian matrix
+    if NameValueArgs.isUseMassMatrix
+        jacobian_full_enable_mass_function = @(tn, yn) jacobian_enable_mass_function(tn, yn(1:dofNum), yn(dofNum+1:end), Parameter);
+        jacobian_opt = odeset('Jacobian', jacobian_full_enable_mass_function);
+    else
+        jacobian_full_disable_mass_function = @(tn, yn) jacobian_disable_mass_function(tn, yn(1:dofNum), yn(dofNum+1:end), Parameter);
+        jacobian_opt = odeset('Jacobian', jacobian_full_disable_mass_function);
+    end
+    % set odeset jacobian option
+    
+    ode_opt = odeset(jacobian_opt, ode_opt);
 end
 
 
@@ -312,5 +335,31 @@ if NameValueArgs.isPlotStatus
 end
 
 
+
+end
+
+% sub function
+function full_jacobian = jacobian_enable_mass_function(tn, yn, dyn, Parameter)
+
+% get J21 and J22 without mass matrix
+[J21, J22] = jacobianJ21J22(tn, yn, dyn, Parameter);
+
+% construct full jacobian matrix
+dofNum = Parameter.Mesh.dofNum;
+full_jacobian = [sparse(dofNum, dofNum), speye(dofNum, dofNum);...
+                 J21,                  J22];
+end
+
+% sub function
+function full_jacobian = jacobian_disable_mass_function(tn, yn, dyn, Parameter)
+
+% get J21 and J22 without mass matrix
+[J21, J22] = jacobianJ21J22(tn, yn, dyn, Parameter);
+
+% construct full jacobian matrix
+dofNum = Parameter.Mesh.dofNum;
+M = Parameter.Matrix.mass;
+full_jacobian = [sparse(dofNum, dofNum), speye(dofNum, dofNum);...
+                 M\J21,                    M\J22];
 
 end

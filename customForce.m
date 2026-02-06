@@ -52,6 +52,6 @@ function F = customForce(qn, dqn, tn, omega, domega, ddomega, Parameter)
 
 dof_num = Parameter.Mesh.dofNum;
 
-F = zeros(dof_num, 1);
+F = sparse(dof_num, 1);
 
 end

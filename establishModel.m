@@ -272,6 +272,26 @@ unbalance = [finalNodes, shaftIDs, finalMag, finalPhase];
 [~, sortIdx] = sort(unbalance(:, 1));
 unbalance = unbalance(sortIdx, :);
 
+
+%%
+
+% collect all Herzian parameter to create Matrix.HerzianParameter
+if Parameter.ComponentSwitch.hasHertzianForce
+    if Parameter.ComponentSwitch.hasIntermediateBearing
+        HerzianParameter = collectHerzianParameter( Parameter.Mesh, ...
+                                                    Parameter.ComponentSwitch, ...
+                                                    Parameter.Shaft, ...
+                                                    Parameter.Bearing, ...
+                                                    Parameter.IntermediateBearing);
+    else
+        HerzianParameter = collectHerzianParameter( Parameter.Mesh, ...
+                                                    Parameter.ComponentSwitch, ...
+                                                    Parameter.Shaft, ...
+                                                    Parameter.Bearing);
+
+    end % end if has intermediate bearing
+end % end if has herzian force
+
 %%
 
 % rayleigh damping
@@ -286,6 +306,7 @@ G = GShaft + GDisk;
 N = NShaft + NDisk;
 C = CShaft +         CBearing + CInterBearing;
 Fg = FgShaft + FgDisk + FgBearing + FgInterBearing;
+Fg = sparse(Fg);
 Q = zeros(length(M), 1); % initial unbalance force
 
 
@@ -321,6 +342,9 @@ Matrix.matrixN = N; % n*n
 Matrix.gravity = Fg; % n*1
 Matrix.unblanceForce = Q; % n*1
 Matrix.unbalance = unbalance; % save unbalance data; Format: [NodeID, ShaftID, Magnitude, Phase]
+if Parameter.ComponentSwitch.hasHertzianForce
+    Matrix.HerzianParameter = HerzianParameter;
+end
 
 
 % pre-calculate G matrix to save time if accerleartion=0
@@ -367,7 +391,7 @@ end
 
 %%
 
-% output
+% output (part of output)
 
 Parameter.Matrix = Matrix;
 

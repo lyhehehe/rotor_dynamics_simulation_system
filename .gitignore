@@ -3,7 +3,6 @@
 *.asv
 
 # ignore auto-generated files
-hertzianForce.m
 dynamicEquation.m
 dynamicEquationNoMass.m
 

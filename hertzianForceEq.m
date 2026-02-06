@@ -91,11 +91,10 @@
 % This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
 %
 
-function f = hertzianForceEq(tn, x, y, omegai, omegao, nb, ri, ro, delta0, kHertz, n)
+function f = hertzianForceEq(x, y, thetai, thetao, nb, ri, ro, delta0, kHertz, n)
 
-omegac = (omegao*ro + omegai*ri) / (ro + ri); % rotation velosity of the cage
 c1 = 2*pi/nb;
-c2 = omegac*tn;
+c2 = (thetao*ro + thetai*ri) / (ro + ri); % rotational angle of the cage;
 c3 = 0;
 c4 = 0;
 for ik = 1:1:nb

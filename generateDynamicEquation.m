@@ -276,6 +276,7 @@ loadMatrix1 = [...
 "UnbalMags   = Parameter.Matrix.unbalance(:, 3)';";...
 "UnbalPhases = Parameter.Matrix.unbalance(:, 4)';"
 ];
+loadMatrix1Jacobian = loadMatrix1([1,2,4]); % save part of str for jacobian matrix calculation
 else
 loadMatrix1 = [...
 " ";...
@@ -287,6 +288,7 @@ loadMatrix1 = [...
 "UnbalMags   = Parameter.Matrix.unbalance(:, 3)';";...
 "UnbalPhases = Parameter.Matrix.unbalance(:, 4)';"
 ];
+loadMatrix1Jacobian = loadMatrix1([1,2,4,5]); % save part of str for jacobian matrix calculation
 end % end if
 fprintf(dq,'%s\n', loadMatrix1);
 
@@ -298,6 +300,7 @@ if ~Parameter.ComponentSwitch.hasLoosingBearing
         "C = Parameter.Matrix.damping;";...
     ];
     fprintf(dq,'%s\n', loadMatrix2);
+    loadMatrix2Jacobian = loadMatrix2;
 end
 
 
@@ -330,8 +333,8 @@ for iShaft = 1:1:shaftNum
 end
 
 %%
-
-% write the part of processing G N Q
+% write the part of processing G N
+processGNJacobian = strings(0,1); % initial for jacobian calculation
 if ~isRemoveDdomega
     for iShaft = 1:1:shaftNum
         processGN = {...
@@ -342,6 +345,8 @@ if ~isRemoveDdomega
         };
         processGN = cell2string(processGN);
         fprintf(dq,'%s\n', processGN);
+        % store each shaft's GN calculation strings for Jacobian generation
+        processGNJacobian = [processGNJacobian; processGN]; %#ok<AGROW>
     end 
 end
 
@@ -418,17 +423,11 @@ fprintf(dq,'%s\n', processQ);
 
 % Hertzian contact force
 if Parameter.ComponentSwitch.hasHertzianForce
-    % generate hertzianForce.m
-    if Parameter.ComponentSwitch.hasIntermediateBearing
-        generateHertzianForce(Parameter.Mesh,Parameter.ComponentSwitch, Parameter.Shaft, Parameter.Bearing, Parameter.IntermediateBearing);
-    else
-        generateHertzianForce(Parameter.Mesh,Parameter.ComponentSwitch, Parameter.Shaft, Parameter.Bearing);
-    end
     % write codes in dynamicEquation.m
     processHertzianForce = [...
 " ";...
 "% calculate Hertzian force";...
-"fHertz = hertzianForce(yn, tn, domega);";...
+"fHertz = hertzianForce(yn, omega, Parameter.Matrix.HerzianParameter, Parameter.Mesh.dofNum);";...
 " ";...
 ];
     fprintf(dq,'%s\n', processHertzianForce);
@@ -436,6 +435,7 @@ if Parameter.ComponentSwitch.hasHertzianForce
 else
     hertzForce = '';
 end
+
 
 %%
 
@@ -552,12 +552,14 @@ fprintf(dq,'%s\n',functionEnd);
 
 
 %%
+
 % Close the currently open fprintf stream to flush writes temporarily
 fclose(dq);
 % transfer .txt -> .m
 system('rename dynamicEquation.txt dynamicEquation.m');
 
 %%
+
 % based on the original dynamicEquation, create a new version without mass
 % matrix for ode() solver in matlab to accelerate calculation 
 
@@ -614,5 +616,10 @@ for k = 1:numel(modifiedLines)
 end
 fclose(fidMod);
 
+
+%%
+
+% Create Jacobian Matrix
+generateJacobian(Parameter, calculateOmega, loadMatrix1Jacobian, loadMatrix2Jacobian, processGNJacobian);
 
 end % end function
