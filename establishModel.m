@@ -15,6 +15,7 @@
 % * Generating mesh discretization
 % * Creating component matrices (shaft, disk, bearing)
 % * Assembling global system matrices
+% * Pre-computing Hertzian contact parameters for nonlinear analysis
 % * Applying numerical conditioning
 % * Handling special configurations (loose bearings, custom rotation profiles)
 %
@@ -28,6 +29,7 @@
 %       .hasLoosingBearing
 %       .hasRubImpact
 %       .hasCouplingMisalignment
+%       .hasHertzianForce
 %   * |IntermediateBearing|: [1×1 struct] % Intermediate bearing parameters
 %   * |RubImpact|: [1×1 struct]           % Rub-impact properties
 %   * |LoosingBearing|: [1×1 struct]      % Loosening bearing parameters
@@ -60,6 +62,7 @@
 %       .unbalanceForce: vector           % Unbalance force vector (n×1)
 %       .gravity: vector                  % Gravity force vector (n×1)
 %       .unbalance: matrix                % Unbalance data [NodeID, ShaftID, Mag, Phase]
+%       .HerzianParameter: struct         % Pre-computed contact parameters (if active)
 %       .gyroscopic_with_domega: matrix   % Precomputed gyroscopic matrix (when applicable)
 %       .stiffnessLoosing: matrix         % Loosened bearing stiffness (if active)
 %       .dampingLoosing: matrix           % Loosened bearing damping (if active)
@@ -70,11 +73,12 @@
 %    * Mesh visualization (|plotMesh|)
 % 2. Discretization:
 %    * Mesh generation (|meshModel|)
-% 3. Component Matrix Generation:
+% 3. Component Matrix & Parameter Generation:
 %    * Shaft FEM matrices (|femShaft|)
 %    * Disk FEM matrices (|femDisk|)
 %    * Bearing FEM matrices (|femBearing|)
 %    * Intermediate bearing matrices (|femInterBearing|)
+%    * Hertzian parameter collection (|collectHerzianParameter|)
 % 4. Matrix Assembly:
 %    * Component matrix expansion
 %    * Rayleigh damping application
@@ -115,11 +119,12 @@
 % * |plotModel|, |plotMesh| - Visualization functions
 % * |meshModel| - Mesh generation
 % * |femShaft|, |femDisk|, |femBearing|, |femInterBearing| - Component matrix generators
+% * |collectHerzianParameter| - Hertzian parameter consolidation
 %
 %% See Also
-% meshModel, femShaft, femDisk, femBearing, calculateResponse
+% meshModel, femShaft, femDisk, femBearing, calculateResponse, collectHerzianParameter
 %
-% Copyright (c) 2021-2025 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
 % This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
 %
 

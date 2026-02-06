@@ -13,6 +13,7 @@
 % under specified operating conditions. The function:
 % * Supports multiple numerical integration methods
 % * Handles custom and standard rotational speed profiles
+% * Supports Mass Matrix and Jacobian Matrix for ODE solvers
 % * Provides automatic initial condition generation
 % * Includes data reduction for large simulations
 % * Monitors numerical convergence during integration
@@ -33,6 +34,9 @@
 %   * |reduceInterval|: Data downsampling factor (default: 1)
 %   * |calculateMethod|: Solver type ('RK', 'ode45', 'ode15s', 'ode23s') (default: 'RK')
 %   * |options|: ODE solver options (for MATLAB ODE solvers)
+%   * |isUseMassMatrix|: Enable mass matrix for ODE solvers (default: false)
+%   * |isUseJacobian|: Enable Jacobian matrix for ODE solvers (default: false)
+%   * |customJacobianFun|: Handle for custom force Jacobian calculation
 %   * |isUseBalanceAsInitial|: Use static balance position as initial condition (default: false)
 %   * |isFreshInitial|: Force recalculation of balance position (default: false)
 %
@@ -51,6 +55,7 @@
 %    * |ode45|: Non-stiff problems
 %    * |ode15s|: Stiff problems
 %    * |ode23s|: Moderately stiff problems
+%    * Supports optional Mass Matrix and Jacobian for improved performance
 %
 %% Initial Condition Handling
 % * Automatic static balance calculation when |isUseBalanceAsInitial=true|
@@ -74,10 +79,9 @@
 % % Basic simulation with Runge-Kutta (After modeling)
 % [q, dq, t] = calculateResponse(sysParams, [0 10], 1000);
 %
-% % ODE15s with custom options (After modeling)
-% opts = odeset('RelTol',1e-6, 'AbsTol',1e-9);
+% % ODE15s with Mass Matrix and Jacobian (After modeling)
 % [q, dq, t] = calculateResponse(sysParams, [0 5], 2000, ...
-%     'calculateMethod', 'ode15s', 'options', opts);
+%     'calculateMethod', 'ode15s', 'isUseMassMatrix', true, 'isUseJacobian', true);
 %
 % % Use static balance as initial condition (After modeling)
 % [q, dq, t] = calculateResponse(sysParams, [0 3], 1500, ...
@@ -92,7 +96,7 @@
 %% See Also
 % dynamicEquation, rungeKutta, ode45, ode15s, calculateBalance
 %
-% Copyright (c) 2021-2025 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
 % This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
 %
 

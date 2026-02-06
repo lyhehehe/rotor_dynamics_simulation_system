@@ -1,6 +1,11 @@
 %-----------------------------------------------------------------------------------
 % This example creates a twin-spool rotor system with speed ratio 1.3 during run-up.
 % The variable cross-section of shaft element is used.
+% This example shows the new feature: enable the mass matrix and Jacobian
+% matrix in matlab ode solver. For the case without customize force, the
+% software automatically define and use Jacobian matrix; otherwise, users
+% shold define Jacobian matrix of customize force in customForceJacobian.m.
+% e.g. [~,~,~] = calculateResponse(..., isUseMassMatrix = true, isUseJacobian = true)
 %-----------------------------------------------------------------------------------
 
 clc

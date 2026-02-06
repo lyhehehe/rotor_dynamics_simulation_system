@@ -1,3 +1,64 @@
+%% collectHerzianParameter - Collect essential parameters for Hertzian contact force calculation
+%
+% This function extracts and organizes geometric and mechanical parameters 
+% from both standard bearings and intermediate bearings to support nonlinear 
+% Hertzian contact force computations.
+%
+%% Syntax
+%  HerzianParameter = collectHerzianParameter(Mesh, ComponentSwitch, Shaft, Bearing)
+%  HerzianParameter = collectHerzianParameter(Mesh, ComponentSwitch, Shaft, Bearing, InterBearing)
+%
+%% Description
+% |collectHerzianParameter| processes system configuration data to generate 
+% a unified parameter structure for contact mechanics. The function:
+% * Identifies bearings requiring Hertzian force calculation
+% * Maps Degrees of Freedom (DOFs) for inner and outer races
+% * Handles ground-to-shaft and shaft-to-shaft (intermediate) connections
+% * Consolidates geometric properties (radii, clearance) and material constants
+% * Automates shaft index mapping for relative rotational speed calculations
+%
+%% Input Arguments
+% * |Mesh| - Discretization data structure containing:
+%   * |dofNum|: Total number of DOFs
+%   * |dofInterval|: Node-to-DOF mapping matrix
+% * |ComponentSwitch| - Logic flags for system components:
+%   * |hasIntermediateBearing|: Flag for shaft-to-shaft bearings
+% * |Shaft| - Shaft configuration containing |amount| (total shaft count)
+% * |Bearing| - Standard bearing data structure:
+%   * |isHertzian|: Logical array for Hertzian model activation
+%   * |radiusInnerRace|, |radiusOuterRace|: Race radii [m]
+%   * |rollerNum|: Number of rolling elements
+%   * |clearance|: Radial clearance [m]
+%   * |contactStiffness|: Hertzian contact stiffness [N/m^n]
+%   * |coefficient|: Load-deflection exponent (e.g., 1.5 for ball bearings)
+% * |InterBearing| - Intermediate bearing data structure (optional):
+%   * Follows similar fields as |Bearing| with additional shaft-linking data
+%
+%% Output Arguments
+% * |HerzianParameter| - Consolidated structure for force calculation:
+%   * |nb|: Number of rollers [1 × N]
+%   * |ri|, |ro|: Inner/outer race radii [1 × N]
+%   * |delta0|: Radial clearances [1 × N]
+%   * |kHertz|: Contact stiffness constants [1 × N]
+%   * |n|: Contact exponents [1 × N]
+%   * |omegaiNo|, |omegaoNo|: Shaft indices for speed referencing [1 × N]
+%   * |hertzDof|: DOF indices for inner/outer race displacement [N × 2]
+%   * |hertzianNum|: Total count of active Hertzian contact pairs
+%
+%% Parameter Mapping Logic
+% 1. **Normal Bearings**: 
+%    * Maps inner race to the specified shaft node.
+%    * Maps outer race to ground (|dofNum + 1|) or a bearing housing mass node.
+% 2. **Intermediate Bearings**: 
+%    * Maps both races to respective nodes on the two connected shafts.
+%    * Determines relative rotation by tracking |innerShaftNo| vs |outerShaftNo|.
+%
+%% See Also
+% calculateResponse, dynamicEquation, hertzianForce
+%
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
+%
 function HerzianParameter = collectHerzianParameter(Mesh, ComponentSwitch, Shaft, Bearing, InterBearing)
 
 arguments
