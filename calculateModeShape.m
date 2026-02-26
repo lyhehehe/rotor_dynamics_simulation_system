@@ -6,14 +6,16 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
 %   exciteRad - Array of target spin speeds/frequencies (rad/s) to extract modes for.
 %
 % Name-Value Optional Arguments:
-%   isPlot      - Logical, whether to plot the 2D geometric mode shapes (default: false)
-%   direction   - Char, 'X' (default) or 'Y', the translational direction to extract.
-%   modeSelect  - Char, 'sync' (default), finds the mode closest to the excitation frequency.
-%   scaleFactor - Char/Double, 'auto' (default) or a specific numerical multiplier for deformation.
+%   isPlot          - Logical, whether to plot the 2D geometric mode shapes (default: false)
+%   direction       - Char, 'X' (default) or 'Y', the translational direction to extract.
+%   modeSelect      - Char, 'sync' (default), finds the mode closest to the excitation frequency.
+%   scaleFactor     - Char/Double, 'auto' (default) or a specific numerical multiplier for deformation.
+%   isUseGyroMatrix - Logical, whether to include gyroscopic matrix G (default: true)
 %
 % Outputs:
 %   ModeShapes  - Cell array containing the mode shape displacement vectors for each shaft.
 %   ZCoords     - Cell array containing the absolute Z-coordinates for each shaft's nodes.
+
     arguments
         Parameter struct
         exciteRad (1,:) double
@@ -21,8 +23,9 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
         options.direction (1,:) char {mustBeMember(options.direction, {'X', 'Y'})} = 'X'
         options.modeSelect (1,:) char {mustBeMember(options.modeSelect, {'sync'})} = 'sync'
         options.scaleFactor = 'auto'
+        options.isUseGyroMatrix (1,1) logical = true % 新增参数
     end
-
+    
     % 1. Extract matrices and initialization
     M = Parameter.Matrix.mass;
     C = Parameter.Matrix.damping;
@@ -51,7 +54,7 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
         endNode = max([IShaftNode.name]);
         shaftDof(iShaft,:) = [dofInterval(startNode,1), dofInterval(endNode,2)];
     end
-
+    
     % Precompute matrix divisions outside the loop
     invM_K = M \ K;
     invM_C = M \ C;
@@ -63,41 +66,67 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
     hw = waitbar(0, 'Calculating Mode Shapes...');
     
     % 2. Main Calculation Loop
-    for iRad = 1:exciteRadNum
-        iBasicSpeed = exciteRad(iRad);
-        G = G_base; 
-        
-        for iShaft = 1:shaftNum
-            if iShaft == 1
-                shaftSpeed = iBasicSpeed;
-            else
-                shaftSpeed = iBasicSpeed * speedRatio(iShaft-1);
+    if options.isUseGyroMatrix
+        % --- 考虑陀螺效应：每次迭代都需要重新组装矩阵并求解特征值 ---
+        for iRad = 1:exciteRadNum
+            iBasicSpeed = exciteRad(iRad);
+            G = G_base; 
+            
+            for iShaft = 1:shaftNum
+                if iShaft == 1
+                    shaftSpeed = iBasicSpeed;
+                else
+                    shaftSpeed = iBasicSpeed * speedRatio(iShaft-1);
+                end
+                rng = shaftDof(iShaft,1) : shaftDof(iShaft,2);
+                G(rng, rng) = shaftSpeed * G(rng, rng);
             end
-            rng = shaftDof(iShaft,1) : shaftDof(iShaft,2);
-            G(rng, rng) = shaftSpeed * G(rng, rng);
+            
+            invM_G = M \ G;
+            A = [-(invM_C + invM_G), -invM_K; ...
+                 eye(dofNum),        zeros(dofNum, dofNum)];
+            
+            [V, D] = eig(full(A));
+            eigenvalues = diag(D);
+            
+            % Mode Selection Strategy ('sync': closest to excitation frequency)
+            targetFreq = iBasicSpeed; 
+            [~, targetIdx] = min(abs(abs(imag(eigenvalues)) - targetFreq));
+            
+            % Extract complex mode shape vector
+            trans = V(:, targetIdx);
+            rawEigVectors(:, iRad) = real(trans) + imag(trans); 
+            
+            if mod(iRad, max(1, floor(exciteRadNum/10))) == 0 || iRad == exciteRadNum
+                waitbar(iRad / exciteRadNum, hw, sprintf('Calculating... %d%%', round(100*iRad/exciteRadNum)));
+            end
         end
         
-        invM_G = M \ G;
-        A = [-(invM_C + invM_G), -invM_K; ...
-             eye(dofNum),        zeros(dofNum, dofNum)];
-        
+    else
+        % --- 不考虑陀螺效应：状态矩阵恒定，只需求解一次特征值 ---
+        disp('Gyroscopic effects disabled. Computing constant eigenvectors...');
+        A = [-invM_C,     -invM_K; ...
+             eye(dofNum), zeros(dofNum, dofNum)];
+             
         [V, D] = eig(full(A));
         eigenvalues = diag(D);
         
-        % Mode Selection Strategy ('sync': closest to excitation frequency)
-        targetFreq = iBasicSpeed; 
-        [~, targetIdx] = min(abs(abs(imag(eigenvalues)) - targetFreq));
-        
-        % Extract complex mode shape vector
-        trans = V(:, targetIdx);
-        rawEigVectors(:, iRad) = real(trans) + imag(trans); 
-        
-        if mod(iRad, max(1, floor(exciteRadNum/10))) == 0 || iRad == exciteRadNum
-            waitbar(iRad / exciteRadNum, hw, sprintf('Calculating... %d%%', round(100*iRad/exciteRadNum)));
+        % 仍需循环遍历各个转速，去恒定的模态池中匹配最接近的频率对应的振型
+        for iRad = 1:exciteRadNum
+            targetFreq = exciteRad(iRad); 
+            [~, targetIdx] = min(abs(abs(imag(eigenvalues)) - targetFreq));
+            
+            trans = V(:, targetIdx);
+            rawEigVectors(:, iRad) = real(trans) + imag(trans); 
+            
+            if mod(iRad, max(1, floor(exciteRadNum/10))) == 0 || iRad == exciteRadNum
+                waitbar(iRad / exciteRadNum, hw, sprintf('Extracting... %d%%', round(100*iRad/exciteRadNum)));
+            end
         end
     end
+    
     close(hw);
-
+    
     % 3. Calculate Global Node Positions (Handling Intermediate Bearings)
     nodeDistance = Parameter.Mesh.nodeDistance;
     offsetPosition = zeros(shaftNum, 1);
@@ -120,7 +149,7 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
     for iShaft = 1:shaftNum
         ZCoords{iShaft} = nodeDistance{iShaft} + offsetPosition(iShaft);
     end
-
+    
     % 4. Extract Translation Displacement for Specific Direction
     targetDof = zeros(length(Node), 1);
     counter = 1;
@@ -143,7 +172,7 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
             counter = counter + nodeNumThisShaft;
         end
     end
-
+    
     % 5. Deformed Geometry Render Engine
     if options.isPlot
         colors = getDesignPalette();

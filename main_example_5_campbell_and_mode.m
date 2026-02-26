@@ -23,7 +23,7 @@ Parameter = establishModel(InitialParameter, "gridFineness", manualGrid);
 % calculate campell diagram
 max_rpm = 10000; % rpm
 exciteRad = linspace(1,max_rpm/60*2*pi, 500);
-[eigMatrix, criticalSpeed] = calculateCampbell(Parameter,exciteRad,"isPlot",true,"isFilter",true,"filterMethod","slope");
+[eigMatrix, criticalSpeed] = calculateCampbell(Parameter,exciteRad,"isPlot",true,"isFilter",true,"filterMethod","slope","isUseGyroMatrix",true);
 
 % calculate mode shape
-[ModeShapes, ZCoords] = calculateModeShape(Parameter, criticalSpeed,"isPlot", true, "direction", "X");
+[ModeShapes, ZCoords] = calculateModeShape(Parameter, criticalSpeed,"isPlot", true, "direction", "X","isUseGyroMatrix",true);
