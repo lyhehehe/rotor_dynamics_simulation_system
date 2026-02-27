@@ -61,9 +61,6 @@ function [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad, opti
     
     % 2. Main Calculation 
     if options.isUseGyroMatrix
-        % Waitbar only needed for loop
-        hw = waitbar(0, 'Calculating Eigenvalues...');
-        
         for iRad = 1:exciteRadNum
             iBasicSpeed = exciteRad(iRad);
             G = G_base; 
@@ -94,16 +91,10 @@ function [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad, opti
             else
                 rawEigVals(:, iRad) = eig(full(A));
             end
-            
-            if mod(iRad, max(1, floor(exciteRadNum/20))) == 0 || iRad == exciteRadNum
-                waitbar(iRad / exciteRadNum, hw, sprintf('Calculating... %d%%', round(100*iRad/exciteRadNum)));
-            end
         end
-        close(hw);
         
     else
         % No Gyroscopic effects: A is constant, compute only once
-        disp('Gyroscopic effects disabled. Calculating constant eigenvalues...');
         A = [-invM_C,     -invM_K; ...
              eye(dofNum), zeros(dofNum, dofNum)];
              
@@ -127,7 +118,6 @@ function [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad, opti
             trackedEig = sort(freqs, 1);
             
         elseif strcmp(options.filterMethod, 'MAC')
-            disp('Performing MAC-based mode tracking...');
             trackedEig(:, 1) = freqs(:, 1);
             [trackedEig(:, 1), sortIdx] = sort(trackedEig(:, 1));
             prev_V = rawEigVecs{1}(:, sortIdx);
@@ -156,7 +146,6 @@ function [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad, opti
             end
             
         elseif strcmp(options.filterMethod, 'slope')
-            disp('Performing slope-based mode tracking...');
             trackedEig(:, 1) = sort(freqs(:, 1));
             
             if exciteRadNum > 1

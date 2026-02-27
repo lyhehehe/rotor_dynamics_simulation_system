@@ -15,7 +15,6 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
 % Outputs:
 %   ModeShapes  - Cell array containing the mode shape displacement vectors for each shaft.
 %   ZCoords     - Cell array containing the absolute Z-coordinates for each shaft's nodes.
-
     arguments
         Parameter struct
         exciteRad (1,:) double
@@ -62,9 +61,6 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
     % Arrays to store extracted vectors
     rawEigVectors = zeros(eigNum, exciteRadNum);
     
-    % Waitbar
-    hw = waitbar(0, 'Calculating Mode Shapes...');
-    
     % 2. Main Calculation Loop
     if options.isUseGyroMatrix
         % --- 考虑陀螺效应：每次迭代都需要重新组装矩阵并求解特征值 ---
@@ -96,15 +92,10 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
             % Extract complex mode shape vector
             trans = V(:, targetIdx);
             rawEigVectors(:, iRad) = real(trans) + imag(trans); 
-            
-            if mod(iRad, max(1, floor(exciteRadNum/10))) == 0 || iRad == exciteRadNum
-                waitbar(iRad / exciteRadNum, hw, sprintf('Calculating... %d%%', round(100*iRad/exciteRadNum)));
-            end
         end
         
     else
         % --- 不考虑陀螺效应：状态矩阵恒定，只需求解一次特征值 ---
-        disp('Gyroscopic effects disabled. Computing constant eigenvectors...');
         A = [-invM_C,     -invM_K; ...
              eye(dofNum), zeros(dofNum, dofNum)];
              
@@ -118,14 +109,8 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
             
             trans = V(:, targetIdx);
             rawEigVectors(:, iRad) = real(trans) + imag(trans); 
-            
-            if mod(iRad, max(1, floor(exciteRadNum/10))) == 0 || iRad == exciteRadNum
-                waitbar(iRad / exciteRadNum, hw, sprintf('Extracting... %d%%', round(100*iRad/exciteRadNum)));
-            end
         end
     end
-    
-    close(hw);
     
     % 3. Calculate Global Node Positions (Handling Intermediate Bearings)
     nodeDistance = Parameter.Mesh.nodeDistance;
