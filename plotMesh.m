@@ -351,9 +351,7 @@ for iShaft = 1:1:Shaft.amount
         for iSegment = 1:1:segmentNumB
             nodeNameB{iSegment} = num2str( NodeSegmentB(iSegment).name ); % Save node name
             % Judge type of bearing
-            condition1 = Parameter.ComponentSwitch.hasIntermediateBearing; 
-            condition2 = ~isempty(NodeSegmentB(iSegment).interBearingNo); 
-            isInterBearing = condition1 && condition2;
+            isInterBearing = Parameter.ComponentSwitch.hasIntermediateBearing && ~isempty(NodeSegmentB(iSegment).interBearingNo);
             
             if isInterBearing
                 % Find which shaft the InterBearing locates on
