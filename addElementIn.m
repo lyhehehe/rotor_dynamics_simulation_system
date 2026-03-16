@@ -4,14 +4,14 @@
 % position, performing element-wise addition at the overlapping region.
 %
 %% Syntax
-%  C = addElementIn(A, B, position)
+%  A = addElementIn(A, B, position)
 %
 %% Description
 % |addElementIn| adds matrix |B| into matrix |A| at the specified |position|, 
 % performing element-wise addition. The function:
 % * Validates matrix dimensions and position indices
 % * Adds corresponding elements in overlapping regions
-% * Returns the combined matrix |C|
+% * Returns the combined matrix |A|
 %
 %% Input Arguments
 % * |A| - Base matrix (larger dimensions)
@@ -20,7 +20,7 @@
 %   element of |B| should be placed in |A|
 %
 %% Output Arguments
-% * |C| - Resulting matrix after adding |B| into |A| at specified position
+% * |A| - Resulting matrix after adding |B| into |A| at specified position
 %   (same dimensions as |A|)
 %
 %% Dimension Requirements
@@ -42,7 +42,7 @@
 %   A = zeros(5,5);
 %   B = [1 2; 3 4];
 %   % Add B into A starting at row 2, column 3
-%   C = addElementIn(A, B, [2,3])
+%   A = addElementIn(A, B, [2,3])
 %   % Result:
 %   % [0 0 0 0 0
 %   %  0 0 1 2 0
@@ -54,7 +54,7 @@
 % This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
 %
 
-function C = addElementIn(A, B, position)
+function A = addElementIn(A, B, position)
 
 % check input
 [rowNumA, columnNumA] = size(A);
@@ -76,8 +76,7 @@ rowIndexInA = rowIndexInB + position(1) - 1;
 columnIndexInA = columnIndexInB + position(2) -1;
 
 
-C = A;
-C(rowIndexInA, columnIndexInA) = A(rowIndexInA, columnIndexInA)...
+A(rowIndexInA, columnIndexInA) = A(rowIndexInA, columnIndexInA)...
                                  + B(rowIndexInB, columnIndexInB);
                              
 end
