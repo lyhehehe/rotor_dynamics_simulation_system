@@ -148,7 +148,7 @@ for iRev = 1 : base_fre : rev_num-(base_fre-1)
     % FFT in order domain
     signal_frequency = 2*fft(signal_sub,[],2)/(div_num*base_fre); % fft
     for iSignal = 1:1:signal_num
-        X{iSignal}(:,index) = signal_frequency(iSignal, components_index+1)';
+        X{iSignal}(:,index) = signal_frequency(iSignal, components_index+1).';
     end
     index = index + 1;
 end
