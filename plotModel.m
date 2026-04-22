@@ -139,9 +139,7 @@ end
 %% 3. Visualization Main Loop (Runs twice: Geometry & Stiffness)
 % mode 1: Geometric Model (Physical)
 % mode 2: Stiffness Model (Mathematical)
-
 modelModes = {'Geometric', 'Stiffness'};
-
 for iMode = 1:length(modelModes)
     currentMode = modelModes{iMode};
     
@@ -172,7 +170,6 @@ for iMode = 1:length(modelModes)
     hold(wholeAxes, 'on');
     
     figureName = cell(Shaft.amount,1);
-
     for iShaft = 1:1:Shaft.amount
         h = figure('visible','off', 'Name', [figTitlePrefix, ' - Shaft ', num2str(iShaft)]);
         ax_h = axes(h);
@@ -192,7 +189,6 @@ for iMode = 1:length(modelModes)
             R_in  = segInnerR(iSeg);
             
             % If Stiffness Radius is NaN (input convention), fallback to Geo Radius
-            % Note: Input function V2 seems to fill it, but good to be safe.
             if isnan(R_out), R_out = Shaft.outerRadius{iShaft}(iSeg); end
             if isnan(R_in),  R_in  = Shaft.innerRadius{iShaft}(iSeg); end
             
@@ -218,14 +214,13 @@ for iMode = 1:length(modelModes)
             end 
         end 
         
-        % --- DRAW BEARING ---
+        % --- DRAW BEARING (Standard) ---
         for iBearing = 1:1:Bearing.amount
             if Bearing.inShaftNo(iBearing) == iShaft
                 positionX = Bearing.positionOnShaftDistance(iBearing) + offsetPosition(iShaft);
                 position = [positionX, 0, 0];
                 
                 % 1. Find the shaft radius AT THIS MODE for the bearing hole
-                % This visualizes if the bearing is attached to the stiffness radius
                 bearingLoc = Bearing.positionOnShaftDistance(iBearing);
                 localShaftR = 0;
                 tempCursor = 0;
@@ -240,7 +235,6 @@ for iMode = 1:length(modelModes)
                 if localShaftR == 0, localShaftR = max(segOuterR); end 
                 
                 % 2. Housing size (Visual only)
-                % Use actual geometry max radius to ensure housing is visible even if stiffness model is thin
                 maxShaftR_Phys = max(Shaft.outerRadius{iShaft}); 
                 if isempty(Disk.outerRadius)
                     maxDiskR = 0;
@@ -261,6 +255,50 @@ for iMode = 1:length(modelModes)
                 addTriangularBlock(ax_h, position, localShaftR, height, width, thickness, 15, 'x', RotateInfo);     
             end 
         end 
+
+        % --- DRAW SPEED-DEPENDENT BEARING ---
+        if isfield(InitialParameter, 'SpeedDependentBearing')
+            SpdBearing = InitialParameter.SpeedDependentBearing;
+            for iSpdBearing = 1:1:SpdBearing.amount
+                if SpdBearing.inShaftNo(iSpdBearing) == iShaft
+                    positionX = SpdBearing.positionOnShaftDistance(iSpdBearing) + offsetPosition(iShaft);
+                    position = [positionX, 0, 0];
+                    
+                    % 1. Find the local shaft radius AT THIS MODE for the bearing hole
+                    % This visualizes if the bearing is attached to the physical or stiffness radius
+                    bearingLoc = SpdBearing.positionOnShaftDistance(iSpdBearing);
+                    localShaftR = 0;
+                    tempCursor = 0;
+                    for k = 1:length(segLengths)
+                        if bearingLoc >= tempCursor && bearingLoc <= (tempCursor + segLengths(k))
+                            localShaftR = segOuterR(k); % Use ACTIVE radius
+                            if isnan(localShaftR), localShaftR = Shaft.outerRadius{iShaft}(k); end
+                            break;
+                        end
+                        tempCursor = tempCursor + segLengths(k);
+                    end
+                    if localShaftR == 0, localShaftR = max(segOuterR); end 
+                    
+                    % 2. Calculate visualization parameters (Housing dimensions)
+                    maxShaftR_Phys = max(Shaft.outerRadius{iShaft}); 
+                    maxDiskR = 0;
+                    if ~isempty(Disk.outerRadius), maxDiskR = max(Disk.outerRadius); end
+                    
+                    height = max(maxDiskR * 1.25, maxShaftR_Phys * 2.5);
+                    width = height;
+                    thickness = 0.01; 
+                    if ~isempty(Disk.thickness), thickness = min(Disk.thickness) * 0.6; end
+                    
+                    RotateInfo.isRotate = true;
+                    RotateInfo.oringin = [0,0,0];
+                    RotateInfo.direction = [1,0,0];
+                    RotateInfo.angle = 90;
+                    
+                    % 3. Call the underlying drawing function
+                    addTriangularBlock(ax_h, position, localShaftR, height, width, thickness, 15, 'x', RotateInfo);     
+                end 
+            end 
+        end
         
         % --- Lighting and Saving Individual Shafts ---
         % Copy objects to composite figure
@@ -283,24 +321,21 @@ for iMode = 1:length(modelModes)
         close(h)
         
     end % End Shaft Loop
-
+    
     % --- Finalize Composite Figure for this Mode ---
     view(wholeAxes, 3); 
     grid(wholeAxes, 'on');
     axis(wholeAxes, 'equal');
     xlabel(wholeAxes, 'X [m]'); ylabel(wholeAxes, 'Y [m]'); zlabel(wholeAxes, 'Z [m]');
     title(wholeAxes, [figTitlePrefix, ': Whole System']);
-
     light(wholeAxes, 'Position', [-1 -1 1], 'Color', [0.8 0.8 1]);
     light(wholeAxes, 'Position', [1 1 1], 'Color', [1 0.9 0.8]);
     lighting(wholeAxes, 'gouraud');
-
+    
     % Save composite figure with Suffix
     set(wholeFig,'Visible','off','CreateFcn','set(gcf,''Visible'',''on'')')
     savefig(wholeFig, ['modelDiagram/theWholeModel', fileSuffix, '.fig']);
     saveas(wholeFig, ['modelDiagram/theWholeModel', fileSuffix, '.png']);
     close(wholeFig);
-
 end % End Mode Loop
-
 end

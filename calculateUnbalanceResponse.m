@@ -133,13 +133,25 @@ function Response = calculateUnbalanceResponse(Parameter, speedMatrix, options)
             G_total(rng, rng) = currentSpeeds(iShaft) * G_total(rng, rng);
         end
         
-        activeShafts = find(currentSpeeds > speedTol);
-        if isempty(activeShafts)
-            continue; 
+        % Update Speed-Dependent Matrices ONCE per steady-state
+        if isfield(Parameter, 'ComponentSwitch') && ...
+           isfield(Parameter.ComponentSwitch, 'hasSpeedDependentBearing') && ...
+           Parameter.ComponentSwitch.hasSpeedDependentBearing
+            
+            % Pass the full 'currentSpeeds' vector so each bearing knows its shaft's speed
+            [K_active, C_active] = updateSpeedDependentMatrices(...
+                Parameter.SpeedDependentBearing, K, C, currentSpeeds, dofInterval);
+        else
+            K_active = K;
+            C_active = C;
         end
+        
+        activeShafts = find(currentSpeeds > speedTol);
+        if isempty(activeShafts), continue; end
         
         uniqueSpeeds = unique(currentSpeeds(activeShafts));
         
+        % Excitation Frequency Loop (omega)
         for j = 1:length(uniqueSpeeds)
             omega = uniqueSpeeds(j);
             sameSpeedShafts = find(abs(currentSpeeds - omega) < speedTol);
@@ -148,8 +160,8 @@ function Response = calculateUnbalanceResponse(Parameter, speedMatrix, options)
             F_total = U_combined * (omega^2);
             
             if max(abs(F_total)) > 1e-12
-                % Dynamic Stiffness H = -M*w^2 + j*w*(C-G) + K
-                H = -(omega^2) * M + 1i * omega * (C - G_total) + K;
+                % Use the constant K_active and C_active for this steady-state condition
+                H = -(omega^2) * M + 1i * omega * (C_active - G_total) + K_active;
                 X = H \ F_total;
                 
                 for k = 1:length(sameSpeedShafts)

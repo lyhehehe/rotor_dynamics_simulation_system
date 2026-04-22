@@ -138,44 +138,48 @@ Disk = InitialParameter.Disk;
 Bearing = InitialParameter.Bearing;
 
 % Component flags
-if InitialParameter.ComponentSwitch.hasRubImpact
+if isfield(InitialParameter, 'ComponentSwitch') && isfield(InitialParameter.ComponentSwitch, 'hasRubImpact') && InitialParameter.ComponentSwitch.hasRubImpact
     RubImpact = InitialParameter.RubImpact; hasRub = true;
 else
     hasRub = false; 
 end
 
-if InitialParameter.ComponentSwitch.hasIntermediateBearing
+if isfield(InitialParameter, 'ComponentSwitch') && isfield(InitialParameter.ComponentSwitch, 'hasIntermediateBearing') && InitialParameter.ComponentSwitch.hasIntermediateBearing
     InterBearing = InitialParameter.IntermediateBearing; hasInterBearing = true;
 else
     hasInterBearing = false; 
 end
 
-if InitialParameter.ComponentSwitch.hasCouplingMisalignment
+if isfield(InitialParameter, 'ComponentSwitch') && isfield(InitialParameter.ComponentSwitch, 'hasCouplingMisalignment') && InitialParameter.ComponentSwitch.hasCouplingMisalignment
     Coupling = InitialParameter.CouplingMisalignment; hasCoupling = true;
 else
     hasCoupling = false; 
 end
 
-if InitialParameter.ComponentSwitch.hasLoosingBearing
+if isfield(InitialParameter, 'ComponentSwitch') && isfield(InitialParameter.ComponentSwitch, 'hasLoosingBearing') && InitialParameter.ComponentSwitch.hasLoosingBearing
     LoosingBearing = InitialParameter.LoosingBearing; hasLoosingBearing = true;
 else
     hasLoosingBearing = false; 
 end
 
-if InitialParameter.ComponentSwitch.hasCustom
+if isfield(InitialParameter, 'ComponentSwitch') && isfield(InitialParameter.ComponentSwitch, 'hasCustom') && InitialParameter.ComponentSwitch.hasCustom
     Custom = InitialParameter.Custom; hasCustom = true;
 else
     hasCustom = false; 
 end
 
+% --- UPDATED: Speed-Dependent Bearing Flag ---
+if isfield(InitialParameter, 'ComponentSwitch') && isfield(InitialParameter.ComponentSwitch, 'hasSpeedDependentBearing') && InitialParameter.ComponentSwitch.hasSpeedDependentBearing
+    SpdBearing = InitialParameter.SpeedDependentBearing; hasSpdBearing = true;
+else
+    hasSpdBearing = false;
+end
+
 %% 1. Generate Key Points (Updated for Segmented Shafts)
 keyPoints = cell(Shaft.amount,1);
-
 for iShaft = 1:1:Shaft.amount
-    % --- NEW: Add Segment Endpoints as Key Points ---
-    % Get segment lengths for current shaft
+    % Add Segment Endpoints as Key Points
     segLengths = Shaft.segmentLength{iShaft};
-    % Calculate cumulative positions (0, L1, L1+L2, ...)
     segmentBoundaries = [0; cumsum(segLengths(:))];
     
     % Initialize keyPoints with segment boundaries
@@ -186,9 +190,17 @@ for iShaft = 1:1:Shaft.amount
     position = find(Disk.inShaftNo == iShaft);
     keyPointsDisk = Disk.positionOnShaftDistance(position);
     
-    % Record bearing 
+    % Record ordinary bearing 
     position = find(Bearing.inShaftNo == iShaft);
     keyPointsBearing = Bearing.positionOnShaftDistance(position);
+    
+    % Record Speed-Dependent Bearing
+    if hasSpdBearing
+        position = find(SpdBearing.inShaftNo == iShaft);
+        keyPointsSpdBearing = SpdBearing.positionOnShaftDistance(position);
+    else
+        keyPointsSpdBearing = [];
+    end
     
     % Record rub
     if hasRub
@@ -220,6 +232,7 @@ for iShaft = 1:1:Shaft.amount
                                 keyPointsRub;...
                                 keyPointsInterBearing;...
                                 keyPointsBearing; ...
+                                keyPointsSpdBearing; ... 
                                 keyPointsCustom]);
           
     % --- Merge Close Points ---
@@ -229,9 +242,6 @@ for iShaft = 1:1:Shaft.amount
         distance = abs( keyPoints{iShaft}(ii) - keyPoints{iShaft}(ii+1) );
         isTooClose = distance < totalL/THRESHOLD_COEFFICIENT;
         if isTooClose
-            % Remove the one that IS NOT a segment boundary if possible?
-            % For simplicity, we remove the second one. 
-            % Ideally, check if one is a hard geometry constraint.
             keyPoints{iShaft}(ii+1) = [];
         else
             ii = ii + 1;
@@ -259,7 +269,6 @@ end
 %% 3. Perform Meshing (Generate Nodes)
 rowSegmentNum = zeros(Shaft.amount,1);
 nodeDistance = cell(Shaft.amount,1);
-
 for iShaft = 1:1:Shaft.amount
     rowSegmentNum(iShaft) = length(keyPoints{iShaft}) - 1; 
     
@@ -293,6 +302,7 @@ for iNode = 1:nodeNum
     if hasCoupling, Node(iNode).couplingNo = []; end
     if hasLoosingBearing, Node(iNode).isLoosingBearing = []; end
     if hasCustom, Node(iNode).CustomNo = []; end
+    if hasSpdBearing, Node(iNode).speedDependentBearingNo = []; end 
 end
  
 iShaft = 1;
@@ -308,17 +318,14 @@ for iNode = 1:1:nodeNum
                                      nodeDistance, iShaft, iNode); 
 end 
 
-%% 5. NEW: Generate ShaftElement Structure
-% This structure stores physical properties for each finite element
+%% 5. Generate ShaftElement Structure
 currentElemIdx = 0;
 shaftElementNum = nodeNum-Shaft.amount;
 ShaftElement(shaftElementNum) = struct();
-
 for iShaft = 1:Shaft.amount
     nodes = nodeDistance{iShaft};
     numElemsInShaft = length(nodes) - 1;
     
-    % Input Properties for this shaft (Cell Arrays)
     inSegLengths  = Shaft.segmentLength{iShaft};
     inOuterR      = Shaft.outerRadius{iShaft};
     inInnerR      = Shaft.innerRadius{iShaft};
@@ -330,11 +337,8 @@ for iShaft = 1:Shaft.amount
     inEcc         = Shaft.eccentricity{iShaft};
     inEccPhase    = Shaft.eccentricityPhase{iShaft};
     
-    % Compute boundaries of input segments for lookup
     inSegBoundaries = [0; cumsum(inSegLengths(:))];
     
-    % Global Node Offset for this shaft
-    % (Calculate how many nodes existed before this shaft)
     nodeOffset = 0;
     for k = 1:(iShaft-1)
         nodeOffset = nodeOffset + length(nodeDistance{k});
@@ -343,21 +347,14 @@ for iShaft = 1:Shaft.amount
     for j = 1:numElemsInShaft
         currentElemIdx = currentElemIdx + 1;
         
-        % Identify Nodes
-        nodeL = nodeOffset + j;     % Global Node ID Left
-        nodeR = nodeOffset + j + 1; % Global Node ID Right
+        nodeL = nodeOffset + j;     
+        nodeR = nodeOffset + j + 1; 
         
-        % Element Geometry
         zL = nodes(j);
         zR = nodes(j+1);
         L_elem = zR - zL;
         zMid = (zL + zR) / 2;
         
-        % Lookup: Which Input Segment contains zMid?
-        % Since we forced segment boundaries into KeyPoints, zMid is guaranteed
-        % to be inside exactly one segment.
-        % Find k where inSegBoundaries(k) <= zMid < inSegBoundaries(k+1)
-        % Using 'histcounts' or logical indexing
         segIdx = find(zMid >= inSegBoundaries(1:end-1) - 1e-9 & ...
                       zMid <= inSegBoundaries(2:end) + 1e-9, 1, 'first');
         
@@ -365,35 +362,34 @@ for iShaft = 1:Shaft.amount
             error('Meshing Error: Element midpoint not found in any segment.');
         end
         
-        % Fill ShaftElement Data
         ShaftElement(currentElemIdx).NodeNo = [nodeL, nodeR];
         ShaftElement(currentElemIdx).ShaftNo = iShaft;
         ShaftElement(currentElemIdx).Length = L_elem;
         
-        % Properties from Input Segment
         ShaftElement(currentElemIdx).outerRadius = inOuterR(segIdx);
         ShaftElement(currentElemIdx).innerRadius = inInnerR(segIdx);
-        
-        % Stiffness Radius Logic (Use stored value, standardize function ensures existence)
         ShaftElement(currentElemIdx).outerRadiusStiff = inOuterRStiff(segIdx);
         ShaftElement(currentElemIdx).innerRadiusStiff = inInnerRStiff(segIdx);
-        
         ShaftElement(currentElemIdx).density = inDensity(segIdx);
         ShaftElement(currentElemIdx).elasticModulus = inE(segIdx);
         ShaftElement(currentElemIdx).poissonRatio = inPoisson(segIdx);
-        
         ShaftElement(currentElemIdx).eccentricity = inEcc(segIdx);
         ShaftElement(currentElemIdx).eccentricityPhase = inEccPhase(segIdx);
     end
 end
 
-%% 6. Match Components to Nodes (Existing Logic)
+%% 6. Match Components to Nodes
 [Disk,Node] = matchElement(Disk, 'disk', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft);
 [Bearing,Node] = matchElement(Bearing, 'bearing', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft);
 if hasRub, [RubImpact,Node] = matchElement(RubImpact, 'rubImpact', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); end
 if hasCoupling, [Coupling,Node] = matchElement(Coupling, 'couplingMisalignment', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); end
 if hasInterBearing, [InterBearing,Node] = matchElement(InterBearing, 'interBearing', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); end
 if hasCustom, [Custom,Node] = matchElement(Custom, 'custom', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); end
+
+% Match Speed-Dependent Bearing
+if hasSpdBearing
+    [SpdBearing,Node] = matchElement(SpdBearing, 'speedDependentBearing', Node, nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft); 
+end
 
 %% 7. Handle Loosing Bearing
 if hasLoosingBearing
@@ -408,12 +404,15 @@ if hasLoosingBearing
 end
 
 %% 8. Add Bearing Nodes (Append to list)
-isInter = false;
-[nodeNum, Bearing, Node] = addNode(nodeNum, Bearing, Node, hasLoosingBearing, isInter);
+[nodeNum, Bearing, Node] = addNode(nodeNum, Bearing, Node, hasLoosingBearing, 'bearing');
 
 if hasInterBearing
-    isInter = true;
-    [nodeNum, InterBearing, Node] = addNode(nodeNum, InterBearing, Node, hasLoosingBearing, isInter);
+    [nodeNum, InterBearing, Node] = addNode(nodeNum, InterBearing, Node, hasLoosingBearing, 'interBearing');
+end
+
+% Generate Internal Nodes for Speed-Dependent Bearing (if mass > 0)
+if hasSpdBearing
+    [nodeNum, SpdBearing, Node] = addNode(nodeNum, SpdBearing, Node, hasLoosingBearing, 'speedDependentBearing');
 end
 
 %% 9. DOF Calculation
@@ -436,10 +435,9 @@ end
 
 %% 10. Output Packaging
 Parameter = InitialParameter;
-
 % Mesh Output
 Mesh.Node = Node;
-Mesh.ShaftElement = ShaftElement; % NEW FIELD
+Mesh.ShaftElement = ShaftElement; 
 Mesh.keyPointsDistance = keyPoints;
 Mesh.nodeDistance = nodeDistance;
 Mesh.nodeNum = nodeNum;
@@ -456,10 +454,12 @@ if hasCoupling, Parameter.CouplingMisalignment = Coupling; end
 if hasInterBearing, Parameter.IntermediateBearing = InterBearing; end
 if hasCustom, Parameter.Custom = Custom; end
 
+% Output Speed-Dependent Bearing
+if hasSpdBearing, Parameter.SpeedDependentBearing = SpdBearing; end
+
 end
 
-%% Subfunctions (Unchanged Logic, Included for completeness)
-
+%% Subfunctions
 function [Element,Node] = matchElement(Element, elementName, Node,...
                           nodeDistance, nodeNum, THRESHOLD_COEFFICIENT, Shaft)
     if strcmp(elementName,'interBearing'), columnNum = 2; else, columnNum = 1; end
@@ -483,6 +483,7 @@ function [Element,Node] = matchElement(Element, elementName, Node,...
                 case 'rubImpact', Node(nodeNo).rubImpactNo = iElement;
                 case 'couplingMisalignment', Node(nodeNo).couplingNo = iElement;
                 case 'custom', Node(nodeNo).customNo = iElement;
+                case 'speedDependentBearing', Node(nodeNo).speedDependentBearingNo = iElement; 
                 case 'interBearing'
                     if sum(isElementHere(:,1)) == 1, Node(nodeNo).interBearingNo = iElement; 
                     else, iElement = iElement - 1; end 
@@ -509,7 +510,7 @@ function [previousShaftNodeNum, iShaft] = judgeShaftEnd(previousShaftNodeNum, no
     end 
 end 
 
-function [nodeNum, Element, Node] = addNode(nodeNum, Element, Node, hasLoosingBearing, isInter)
+function [nodeNum, Element, Node] = addNode(nodeNum, Element, Node, hasLoosingBearing, elementType)
     indexHasMass = find(Element.mass' ~= 0); 
     [indexHasMassRow, indexHasMassCol] = find(Element.mass' ~= 0); 
     bearingNodeNum = length(indexHasMass);
@@ -520,8 +521,15 @@ function [nodeNum, Element, Node] = addNode(nodeNum, Element, Node, hasLoosingBe
         onNodeNo = Element.positionOnShaftNode(indexHasMassCol(iBearingNode),:);
         Node(newNodeNo).onShaftNo = [Node(onNodeNo).onShaftNo];
         Node(newNodeNo).onShaftDistance = [Node(onNodeNo).onShaftDistance];
-        if isInter, Node(newNodeNo).interBearingNo = unique([Node(onNodeNo).interBearingNo]);
-        else, Node(newNodeNo).bearingNo = Node(onNodeNo).bearingNo; end
+        
+        if strcmp(elementType, 'interBearing')
+            Node(newNodeNo).interBearingNo = unique([Node(onNodeNo).interBearingNo]);
+        elseif strcmp(elementType, 'speedDependentBearing')
+            Node(newNodeNo).speedDependentBearingNo = Node(onNodeNo).speedDependentBearingNo;
+        else
+            Node(newNodeNo).bearingNo = Node(onNodeNo).bearingNo; 
+        end
+        
         if hasLoosingBearing, Node(newNodeNo).isLoosingBearing = Node(onNodeNo).isLoosingBearing; end
         Node(newNodeNo).name = newNodeNo; 
         Node(newNodeNo).dof = Element.dofOfEachNodes(indexHasMassCol(iBearingNode),indexHasMassRow(iBearingNode));

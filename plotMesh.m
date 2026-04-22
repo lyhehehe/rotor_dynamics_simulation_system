@@ -116,6 +116,14 @@ keyPointsDistance = Parameter.Mesh.keyPointsDistance;
 nodeDistance = Parameter.Mesh.nodeDistance;
 Node = Parameter.Mesh.Node;
 ShaftElement = Parameter.Mesh.ShaftElement; 
+
+% --- NEW: Extract Speed-Dependent Bearing Flag ---
+if isfield(Parameter, 'ComponentSwitch') && isfield(Parameter.ComponentSwitch, 'hasSpeedDependentBearing')
+    hasSpdBearingFlag = Parameter.ComponentSwitch.hasSpeedDependentBearing;
+else
+    hasSpdBearingFlag = false;
+end
+
 %%
 % Generate folder to save figures
 hasFolder = exist('meshDiagram','dir');
@@ -129,9 +137,7 @@ end
 % Plot the key points on each shaft
 for iShaft = 1:1:Shaft.amount
     
-    % [Modified] Pre-calculate the maximum radius across BOTH modes for unified scaling.
-    % This ensures that when switching between Geometric and Stiffness plots,
-    % the visual scale remains constant, allowing users to observe radius differences.
+    % Pre-calculate the maximum radius across BOTH modes for unified scaling.
     currentShaftElems = ShaftElement([ShaftElement.ShaftNo] == iShaft);
     
     % Extract all outer radii (Geometric)
@@ -153,7 +159,6 @@ for iShaft = 1:1:Shaft.amount
     
     % Calculate text gap based on the unified radius to keep labels stable
     text_gap = max(maxR_Unified * 0.2, 0.005); 
-
     % Define modes
     modes = {'Geometric', 'Stiffness'};
     
@@ -177,7 +182,6 @@ for iShaft = 1:1:Shaft.amount
         % Create figure
         figureName = ['Mesh Result of Shaft ', num2str(iShaft), titleSuffix];
         
-        % [Modified] Removed 'Color', 'w'. Allow default background color.
         % Units set to normalized for responsive sizing.
         h = figure('name', figureName, 'Visible', 'off', ...
                    'Units', 'normalized', 'Position', [0.1, 0.1, 0.8, 0.6]);
@@ -188,11 +192,10 @@ for iShaft = 1:1:Shaft.amount
         % Legend Axes: Bottom 15%
         bottomAx = axes('Parent', h, 'Units', 'normalized', 'Position', [0.05, 0.02, 0.9, 0.15]);
         
-        % [Modified] Enclose the main axes with a box (top and right borders)
+        % Enclose the main axes with a box (top and right borders)
         box(mainAx, 'on'); 
         
         % Plot shaft elements (Pipe walls)
-        % Note: We iterate again for drawing, using specific mode data
         for k = 1:length(currentShaftElems)
             elem = currentShaftElems(k);
             L = elem.Length;
@@ -254,7 +257,7 @@ for iShaft = 1:1:Shaft.amount
         end
         xText = [NodeSegment.onShaftDistance];
         
-        % [Modified] Use maxR_Unified for positioning to keep labels stable across modes
+        % Use maxR_Unified for positioning to keep labels stable across modes
         yText = -(maxR_Unified + text_gap) * ones(1,segmentNum); 
         text(mainAx, xText,yText,nodeName, 'HorizontalAlignment', 'center', ...
              'VerticalAlignment', 'top', 'FontSize', 8);
@@ -282,6 +285,14 @@ for iShaft = 1:1:Shaft.amount
                     bearingName = ['B ',num2str(NodeSegment(iSegment).bearingNo)];
                 end          
             end 
+
+            % --- UPDATED: Speed-Dependent Bearing using FLAG ---
+            speedDepBearingName = [];
+            if hasSpdBearingFlag
+                if ~isempty(NodeSegment(iSegment).speedDependentBearingNo)
+                    speedDepBearingName = ['SDB ',num2str(NodeSegment(iSegment).speedDependentBearingNo)];
+                end
+            end
               
             % Intermediate bearing
             interBearingName = [];
@@ -319,6 +330,7 @@ for iShaft = 1:1:Shaft.amount
             elementName{iSegment} = {   customName;...
                                         couplingMisName;...
                                         rubImpactName;...
+                                        speedDepBearingName;... 
                                         interBearingName;...
                                         bearingName;...
                                         diskName};
@@ -331,7 +343,7 @@ for iShaft = 1:1:Shaft.amount
         
         xText = [NodeSegment.onShaftDistance];
         
-        % [Modified] Use maxR_Unified for positioning
+        % Use maxR_Unified for positioning
         yText = (maxR_Unified + text_gap) * ones(1,segmentNum);
         text(mainAx, xText,yText,elementName, 'HorizontalAlignment', 'center',...
              'VerticalAlignment', 'bottom', 'FontSize', 8, 'Interpreter', 'none');
@@ -371,7 +383,7 @@ for iShaft = 1:1:Shaft.amount
             posRecorder(iSegment) = xText; 
             noInColumnRecorder(iSegment) = noInColumn;
             
-            % [Modified] Use maxR_Unified for positioning
+            % Use maxR_Unified for positioning
             baseY = -(maxR_Unified + text_gap * 4); 
             yText = baseY - (noInColumn-1) * (text_gap * 3); 
             xMark = xText;
@@ -397,7 +409,7 @@ for iShaft = 1:1:Shaft.amount
         axis(mainAx, 'equal'); 
         
         maxStackCount = max([1;noInColumnRecorder]);
-        % [Modified] Calculate limits based on Unified Radius for consistent zooming
+        % Calculate limits based on Unified Radius for consistent zooming
         upperLim = maxR_Unified + text_gap * 6; 
         lowerLim = -(maxR_Unified + text_gap * 4 + maxStackCount * (text_gap * 3)); 
         
@@ -438,6 +450,14 @@ for iShaft = 1:1:Shaft.amount
         textLegends = {};
         hasDisk = any(~cellfun(@isempty, {NodeSegment.diskNo}));
         hasBearing = any(~cellfun(@isempty, {NodeSegment.bearingNo}));
+        
+        % --- UPDATED: Use FLAG for Speed-Dependent Bearing in Legend ---
+        if hasSpdBearingFlag
+            hasSpeedDepBearing = any(~cellfun(@isempty, {NodeSegment.speedDependentBearingNo}));
+        else
+            hasSpeedDepBearing = false;
+        end
+        
         hasLoosingBearing = Parameter.ComponentSwitch.hasLoosingBearing;
         hasInterBearingText = Parameter.ComponentSwitch.hasIntermediateBearing;
         hasRubImpact = Parameter.ComponentSwitch.hasRubImpact;
@@ -450,6 +470,12 @@ for iShaft = 1:1:Shaft.amount
         if hasBearing
             textLegends{end+1} = 'B: Bearing';
         end
+        
+        % Add Speed-Dependent Bearing to Legend 
+        if hasSpeedDepBearing
+            textLegends{end+1} = 'SDB: Speed-Dependent Bearing';
+        end
+        
         if hasInterBearingText
             textLegends{end+1} = 'IB: Inter-shaft Bearing';
         end
@@ -502,7 +528,7 @@ for iShaft = 1:1:Shaft.amount
         end
         
         % Bearing legend
-        if hasOrdinaryBearing
+        if hasOrdinaryBearing || hasSpeedDepBearing 
             s_beairng = scatter(bottomAx, xPositions,yPos);
             s_beairng.SizeData = 45;
             s_beairng.MarkerFaceColor = '#7E2F8E';
