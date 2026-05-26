@@ -1,21 +1,47 @@
-function [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad, options)
-% CALCULATECAMPBELL Calculates the Campbell diagram and critical speeds for a multi-shaft rotor system.
-% 
-% Inputs:
-%   Parameter - Struct containing mass, stiffness, damping, gyroscopic matrices and mesh info.
-%   exciteRad - Array of baseline spin speeds (e.g., linspace(0, 1500, 151)).
-% 
-% Name-Value Optional Arguments:
-%   isPlot          - Logical, whether to plot the Campbell diagram (default: false)
-%   isFilter        - Logical, whether to use advanced mode tracking (default: false)
-%   filterMethod    - Char, 'MAC' or 'slope' (default: 'MAC')
-%   tolRad          - Double, tolerance for rigid body mode filtering (default: 1e-1)
-%   isUseGyroMatrix - Logical, whether to include gyroscopic matrix G (default: true)
+%% calculateCampbell - Calculate Campbell diagram and critical speeds for a multi-shaft rotor system
 %
-% Outputs:
-%   newEig         - Filtered/sorted natural frequencies matrix (N x length(exciteRad)), in rad/s.
-%   criticalSpeeds - A sorted vector of critical speeds (rad/s) where mode lines cross excitation lines.
-    
+% This function computes natural frequencies across a speed sweep and identifies
+% critical speeds by intersecting mode frequency curves with engine-order
+% excitation lines.
+%
+%% Syntax
+%  [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad)
+%  [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad, Name=Value)
+%
+%% Description
+% |calculateCampbell| solves the generalized eigenvalue problem at each
+% speed in |exciteRad| to track natural frequencies across the operating range.
+% The function:
+% * Builds the first-order state-space form and extracts eigenvalues
+% * Optionally applies mode tracking using MAC or slope-based filtering
+% * Plots the Campbell diagram and marks critical speeds if requested
+% * Supports optional inclusion of the gyroscopic matrix
+%
+%% Input Arguments
+% * |Parameter| - System configuration structure containing:
+%   * |Matrix|: Global matrices (mass, stiffness, damping, gyroscopic)
+%   * |Mesh|: Mesh data including |dofNum| and |dofInterval|
+%   * |Status|: Speed ratio |ratio| for multi-shaft gyroscopic scaling
+%   * |Shaft|: Shaft properties including |amount|
+% * |exciteRad| - Speed sweep vector [rad/s] [1×N double]
+%
+%% Name-Value Arguments
+% * |isPlot|          - Plot Campbell diagram (default: false) [logical]
+% * |isFilter|        - Enable mode tracking across speed steps (default: false) [logical]
+% * |filterMethod|    - Mode tracking algorithm: 'MAC' or 'slope' (default: 'MAC') [char]
+% * |tolRad|          - Rigid-body mode rejection threshold [rad/s] (default: 0.1) [double]
+% * |isUseGyroMatrix| - Include gyroscopic matrix in eigenvalue problem (default: true) [logical]
+%
+%% Output Arguments
+% * |newEig|         - Natural frequency matrix [rad/s] [nModes×N double]
+% * |criticalSpeeds| - Sorted critical speed vector [rad/s] where mode lines cross excitation lines [1×K double]
+%
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
+%
+
+function [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad, options)
+
     arguments
         Parameter struct
         exciteRad (1,:) double
@@ -23,7 +49,7 @@ function [newEig, criticalSpeeds] = calculateCampbell(Parameter, exciteRad, opti
         options.isFilter (1,1) logical = false
         options.filterMethod (1,:) char {mustBeMember(options.filterMethod, {'slope', 'MAC'})} = 'MAC'
         options.tolRad (1,1) double = 1e-1
-        options.isUseGyroMatrix (1,1) logical = true  % 新增参数
+        options.isUseGyroMatrix (1,1) logical = true  % added option
     end
     
     % 1. Extract matrices and initialization

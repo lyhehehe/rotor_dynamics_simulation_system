@@ -1,20 +1,45 @@
+%% calculateModeShape - Calculate and visualize geometric mode shapes for a multi-shaft rotor system
+%
+% This function extracts synchronous mode shape vectors at specified shaft speeds
+% and optionally renders the deformed rotor geometry with shaft cross-sections.
+%
+%% Syntax
+%  [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad)
+%  [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, Name=Value)
+%
+%% Description
+% |calculateModeShape| assembles the state-space form, computes eigenvalues and
+% eigenvectors, and extracts the translational mode shape at each requested speed.
+% The function:
+% * Builds and solves the first-order eigenvalue problem at each speed in |exciteRad|
+% * Selects the mode whose natural frequency is closest to the current spin speed
+% * Accounts for shaft offsets introduced by intermediate bearings when computing global Z-coordinates
+% * Renders deformed shaft geometry with spline-smoothed cross-sections if |isPlot| is true
+%
+%% Input Arguments
+% * |Parameter| - System configuration structure containing:
+%   * |Matrix|: Global matrices (mass, stiffness, damping, gyroscopic)
+%   * |Mesh|: Mesh data including |dofNum|, |dofInterval|, |nodeDistance|, |ShaftElement|
+%   * |Status|: Speed ratio |ratio| for multi-shaft gyroscopic scaling
+%   * |Shaft|: Shaft properties including |amount|
+% * |exciteRad| - Target spin speeds [rad/s] at which to extract mode shapes [1×N double]
+%
+%% Name-Value Arguments
+% * |isPlot|          - Render deformed geometry plots (default: false) [logical]
+% * |direction|       - Translational direction to extract: 'X' or 'Y' (default: 'X') [char]
+% * |modeSelect|      - Mode selection strategy: 'sync' — closest to excitation frequency (default: 'sync') [char]
+% * |scaleFactor|     - Deformation scale: 'auto' or a numeric multiplier (default: 'auto') [char|double]
+% * |isUseGyroMatrix| - Include gyroscopic matrix in eigenvalue problem (default: true) [logical]
+%
+%% Output Arguments
+% * |ModeShapes| - Mode shape displacement vectors, one cell per shaft per speed [shaftNum×N cell]
+% * |ZCoords|    - Global Z-coordinates of shaft nodes accounting for intermediate bearing offsets [shaftNum×1 cell]
+%
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
+%
+
 function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, options)
-% CALCULATEMODESHAPE Calculates and visualizes the deformed geometric mode shapes.
-%
-% Inputs:
-%   Parameter - Struct containing mass, stiffness, damping, gyroscopic matrices, and mesh info.
-%   exciteRad - Array of target spin speeds/frequencies (rad/s) to extract modes for.
-%
-% Name-Value Optional Arguments:
-%   isPlot          - Logical, whether to plot the 2D geometric mode shapes (default: false)
-%   direction       - Char, 'X' (default) or 'Y', the translational direction to extract.
-%   modeSelect      - Char, 'sync' (default), finds the mode closest to the excitation frequency.
-%   scaleFactor     - Char/Double, 'auto' (default) or a specific numerical multiplier for deformation.
-%   isUseGyroMatrix - Logical, whether to include gyroscopic matrix G (default: true)
-%
-% Outputs:
-%   ModeShapes  - Cell array containing the mode shape displacement vectors for each shaft.
-%   ZCoords     - Cell array containing the absolute Z-coordinates for each shaft's nodes.
     arguments
         Parameter struct
         exciteRad (1,:) double
@@ -22,7 +47,7 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
         options.direction (1,:) char {mustBeMember(options.direction, {'X', 'Y'})} = 'X'
         options.modeSelect (1,:) char {mustBeMember(options.modeSelect, {'sync'})} = 'sync'
         options.scaleFactor = 'auto'
-        options.isUseGyroMatrix (1,1) logical = true % 新增参数
+        options.isUseGyroMatrix (1,1) logical = true % added option
     end
     
     % 1. Extract matrices and initialization
@@ -63,7 +88,7 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
     
     % 2. Main Calculation Loop
     if options.isUseGyroMatrix
-        % --- 考虑陀螺效应：每次迭代都需要重新组装矩阵并求解特征值 ---
+        % --- With gyroscopic effect: reassemble matrix and solve eigenvalue at each iteration ---
         for iRad = 1:exciteRadNum
             iBasicSpeed = exciteRad(iRad);
             G = G_base; 
@@ -95,14 +120,14 @@ function [ModeShapes, ZCoords] = calculateModeShape(Parameter, exciteRad, option
         end
         
     else
-        % --- 不考虑陀螺效应：状态矩阵恒定，只需求解一次特征值 ---
+        % --- Without gyroscopic effect: state matrix is constant, solve eigenvalue only once ---
         A = [-invM_C,     -invM_K; ...
              eye(dofNum), zeros(dofNum, dofNum)];
              
         [V, D] = eig(full(A));
         eigenvalues = diag(D);
         
-        % 仍需循环遍历各个转速，去恒定的模态池中匹配最接近的频率对应的振型
+        % Still loop over each speed to match the closest frequency mode shape from the constant modal pool
         for iRad = 1:exciteRadNum
             targetFreq = exciteRad(iRad); 
             [~, targetIdx] = min(abs(abs(imag(eigenvalues)) - targetFreq));

@@ -1,85 +1,65 @@
-%% inputIntermediateBearing - Configure intermediate bearings with Hertzian contact
+%% inputSpeedDependentBearingSingle2 - Configure speed-dependent bearing parameters
 %
-% This function configures parameters for intermediate bearings connecting 
-% dual-shaft systems, supporting both linear and Hertzian contact models 
-% for rotor dynamics analysis.
+% This function configures bearings whose stiffness and damping matrices are
+% tabulated as functions of shaft speed. It represents linearized bearing
+% coefficients (e.g., derived from Hertzian contact analysis) for use with
+% the frequency-domain unbalance response solver.
 %
 %% Syntax
-%  OutputParameter = inputIntermediateBearing(InputParameter)
+%  Parameter = inputSpeedDependentBearingSingle2(InitialParameter)
 %
 %% Description
-% |inputIntermediateBearing| adds intermediate bearing configuration to 
-% existing rotor system parameters. It supports:
-% * Linear spring-damper connections between shafts
-% * Mass-spring chain connections
-% * Hertzian contact force modeling
+% |inputSpeedDependentBearingSingle2| adds a |SpeedDependentBearing| configuration
+% to the input parameter structure. The bearing stiffness and damping matrices
+% are defined as [bearings x speed-points] lookup tables;
+% |updateSpeedDependentMatrices| interpolates these tables at each frequency
+% step during FRF analysis. The function:
+% * Defines full 2x2 stiffness (Kxx, Kyy, Kxy, Kyx) and damping (Cxx, Cyy, Cxy, Cyx) matrices
+% * Validates input data via |checkInputData|
+% * Sorts bearings by axial position via |sortRowsWithShaftDis|
+% * Sets |ComponentSwitch.hasSpeedDependentBearing = true|
 %
-% * Inputs:
-%   * |InputParameter| - Preconfigured system parameters structure 
+%% Input Arguments
+% * |InitialParameter| - Preconfigured system parameter structure created by an
+%   |inputEssentialParameter*| function
 %
-% * Outputs:
-%   * |OutputParameter| - Updated parameter structure with intermediate bearings
+%% Output Arguments
+% * |Parameter| - Updated parameter structure with |SpeedDependentBearing| field appended
 %
-%% Intermediate Bearing Parameters (IntermediateBearing structure)
-% * amount              - Number of intermediate bearings (scalar)
-% * betweenShaftNo      - Connected shaft indices [n×2 matrix]
-% * dofOfEachNodes      - Degrees of freedom per node (column vector)
-% * positionOnShaftDistance - Mounting positions from shaft ends [n×2 matrix, m]
-% * isHertzian          - Hertzian contact activation flags (logical column)
-% * isHertzianTop       - Hertzian force position flags (logical column)
-% * stiffness           - Horizontal stiffness [N/m] (matrix)
-% * stiffnessVertical   - Vertical stiffness [N/m] (matrix)
-% * damping             - Horizontal damping [Ns/m] (matrix)
-% * dampingVertical     - Vertical damping [Ns/m] (matrix)
-% * mass                - Intermediate masses [kg] (column vector)
-% * rollerNum           - Number of rolling elements (column vector)
-% * radiusInnerRace     - Inner race radii [m] (column vector)
-% * radiusOuterRace     - Outer race radii [m] (column vector)
-% * innerShaftNo        - Shaft containing inner race (column vector)
-% * clearance           - Bearing clearances [m] (column vector)
-% * contactStiffness    - Hertzian stiffness [N/m^1.5] (column vector)
-% * coefficient         - Contact force exponent (column vector)
-%
-%% Model Configuration Rules
-% * Connection Types:
-%   * Basic Connection: Linear spring-damper between shafts
-%   * Mass-spring Chain: Multiple masses with sequential stiffness/damping
-%   * Hertzian Contact: Nonlinear force at specified position 
-%     (isHertzianTop=true for top connection, false for bottom)
-% * Automatic Sorting:
-%   * Shaft indices automatically sorted in ascending order
-%   * Associated parameters (stiffness, mass, DOF) reordered consistently
+%% SpeedDependentBearing Parameters (SpeedDependentBearing structure)
+% * |amount|                     - Number of speed-dependent bearings (scalar)
+% * |inShaftNo|                  - Shaft index for each bearing [n×1 column vector]
+% * |dofOfEachNodes|             - DOF per node; must be 0 (no bearing mass) [n×1 column vector]
+% * |positionOnShaftDistance|    - Axial position from shaft left end [m] [n×1 column vector]
+% * |speed|                      - Speed lookup vector [rad/s] [1×m row vector]
+% * |stiffness|                  - Horizontal stiffness Kxx [N/m] [n×m matrix]
+% * |stiffnessVertical|          - Vertical stiffness Kyy [N/m] [n×m matrix]
+% * |stiffnessHV|                - Cross-coupled stiffness Kxy [N/m] [n×m matrix]
+% * |stiffnessVH|                - Cross-coupled stiffness Kyx [N/m] [n×m matrix]
+% * |damping|                    - Horizontal damping Cxx [Ns/m] [n×m matrix]
+% * |dampingVertical|            - Vertical damping Cyy [Ns/m] [n×m matrix]
+% * |dampingHV|                  - Cross-coupled damping Cxy [Ns/m] [n×m matrix]
+% * |dampingVH|                  - Cross-coupled damping Cyx [Ns/m] [n×m matrix]
+% * |mass|                       - Bearing mass [kg]; must be zero [n×1 column vector]
+% * |isHertzian|                 - Hertzian contact flag; must be 0 for this type [n×1 column vector]
 %
 %% System Flags
-% Automatically enables:
-% * |hasIntermediateBearing| in ComponentSwitch
-% * |hasHertzianForce| if any bearing has |isHertzian=true|
+% Automatically sets |ComponentSwitch.hasSpeedDependentBearing = true|.
 %
-%% Example
-%   % Initialize system parameters
-%   sysParams = inputEssentialParameterBO();
-%   % Configure intermediate bearings
-%   sysParams = inputIntermediateBearing(sysParams);
-%
-%% See Also
-%  checkInputData, sortRowsWithShaftDis, inputEssentialParameterBO
-%
-% Copyright (c) 2021-2025 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
 % This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
 %
 
-
-%%
 function Parameter = inputSpeedDependentBearingSingle2(InitialParameter)
-% Input parameters for speed-dependent bearings 
+% Input parameters for speed-dependent bearings
 % (Linearized results considering non-linear factors like Hertzian contact)
 SpeedDependentBearing.amount          = 2;
 SpeedDependentBearing.inShaftNo       = [1; 1];
-SpeedDependentBearing.dofOfEachNodes  = [0; 0]; % dof must be 0 
+SpeedDependentBearing.dofOfEachNodes  = [0; 0]; % dof must be 0
 SpeedDependentBearing.positionOnShaftDistance = [0; 517.2] * 10^-3; % from the left end of the shaft (m)
 
 % Speed vector (rad/s)
-SpeedDependentBearing.speed           = [100, 200, 300]; 
+SpeedDependentBearing.speed           = [100, 200, 300];
 
 % Stiffness matrices (Rows: number of bearings, Columns: number of speed points)
 SpeedDependentBearing.stiffness       = [1e6, 5e6, 1e7; 2e6, 7e6, 2e7]; % Horizontal stiffness Kxx (N/m)
@@ -98,7 +78,7 @@ SpeedDependentBearing.mass = zeros(SpeedDependentBearing.amount, 1); % kg
 SpeedDependentBearing.isHertzian = zeros(SpeedDependentBearing.amount, 1); % boolean, must be 0
 
 % Data validation and sorting
-trans = rmfield(SpeedDependentBearing, 'speed'); 
+trans = rmfield(SpeedDependentBearing, 'speed');
 checkInputData(trans)
 trans = sortRowsWithShaftDis(trans);
 trans.speed = SpeedDependentBearing.speed;
@@ -110,4 +90,3 @@ Parameter.SpeedDependentBearing = trans;
 % enable the flag
 Parameter.ComponentSwitch.hasSpeedDependentBearing = true;
 end
-

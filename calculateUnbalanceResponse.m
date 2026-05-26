@@ -1,55 +1,50 @@
+%% calculateUnbalanceResponse - Calculate steady-state unbalance response in the frequency domain
+%
+% This function solves the complex linear equation of motion at each operating
+% condition to obtain the synchronous vibration amplitude and phase for every DOF.
+% It supports multi-shaft systems with speed-dependent bearings and provides
+% optional orbit trajectory plots.
+%
+%% Syntax
+%  Response = calculateUnbalanceResponse(Parameter)
+%  Response = calculateUnbalanceResponse(Parameter, speedMatrix)
+%  Response = calculateUnbalanceResponse(Parameter, speedMatrix, Name=Value)
+%
+%% Description
+% |calculateUnbalanceResponse| assembles the dynamic stiffness matrix
+% H(omega) = -omega^2*M + i*omega*(C - G_total) + K at each operating condition
+% and solves H*X = F for the complex displacement vector. The function:
+% * Auto-generates a single-condition speed matrix from |Parameter.Status| if |speedMatrix| is omitted
+% * Constructs the gyroscopic matrix dynamically for multi-shaft speed ratios
+% * Updates speed-dependent bearing matrices via |updateSpeedDependentMatrices| when applicable
+% * Superimposes unbalance forces from shafts sharing the same frequency before inversion
+% * Separates the response by excitation source (one output slice per shaft)
+% * Optionally plots orbit trajectories at specified nodes and conditions
+%
+%% Input Arguments
+% * |Parameter| - System configuration structure containing:
+%   * |Matrix|: Global matrices (mass, stiffness, damping, gyroscopic, unbalance)
+%   * |Mesh|: Mesh data including |dofNum| and |dofInterval|
+%   * |Status|: |vmax| (scalar, Shaft 1 max speed) and |ratio| for multi-shaft speed scaling
+%   * |Shaft|: Shaft properties including |amount|
+% * |speedMatrix| - Operating speeds [rad/s]; each column is one condition [shaftNum×numSpeeds double]
+%   Pass |[]| to use a single default condition from |Parameter.Status.vmax| and |ratio|
+%
+%% Name-Value Arguments
+% * |isPlot|           - Plot orbit trajectories (default: false) [logical]
+% * |plotNodeID|       - Node IDs to plot (default: 1) [1×P double]
+% * |plotConditionIdx| - Speed condition indices to plot (default: 1) [1×Q double]
+%
+%% Output Arguments
+% * |Response| - Complex steady-state displacement [m] [dofNum×numSpeeds×shaftNum double]
+%   Response(:, i, k) is the vibration at condition i excited exclusively by
+%   unbalance forces from Shaft k (at Shaft k's rotation frequency)
+%
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
+%
+
 function Response = calculateUnbalanceResponse(Parameter, speedMatrix, options)
-% CALCULATEUNBALANCERESPONSE Calculates steady-state unbalance response and optionally plots orbits.
-%
-% Usage:
-%   R = calculateUnbalanceResponse(Parameter)
-%       Computes the response using a single default operating condition based on 
-%       Parameter.Status.vmax and Parameter.Status.ratio, without plotting.
-%
-%   R = calculateUnbalanceResponse(Parameter, mySpeedMatrix)
-%       Computes responses across multiple custom operating conditions defined in 
-%       mySpeedMatrix, without plotting.
-%
-%   R = calculateUnbalanceResponse(Parameter, [], 'isPlot', true, 'plotNodeID', [3, 5])
-%       Computes the default condition and plots the orbit trajectories for Nodes 3 and 5.
-%
-%   R = calculateUnbalanceResponse(Parameter, mySpeedMatrix, 'isPlot', true, 'plotConditionIdx', 10)
-%       Computes custom conditions and plots the orbit for Node 1 (default) at the 10th condition.
-%
-% Inputs:
-%   Parameter   - Struct containing system matrices and mesh info. 
-%                 Note: Parameter.Status.vmax should be a scalar (max speed of Shaft 1).
-%   speedMatrix - (Optional) A [shaftNum, numSpeeds] double matrix of operating speeds (rad/s).
-%                 Each column represents a specific operating condition. 
-%                 If empty [], it automatically generates a single-column matrix.
-%
-% Name-Value Optional Arguments:
-%   isPlot           - (Logical) Whether to plot the orbit trajectory. Default is false.
-%   plotNodeID       - (Double Array) Array of Node IDs to plot. Default is 1.
-%   plotConditionIdx - (Double Array) Array of speed condition indices to plot. Default is 1.
-%
-% Output:
-%   Response - Complex 3D array of size [dofNum, numSpeeds, shaftNum].
-%       Dimension 1 (dofNum):    The degree of freedom index of the system.
-%       Dimension 2 (numSpeeds): The operating condition index (column of speedMatrix).
-%       Dimension 3 (shaftNum):  The EXCITATION SOURCE index. 
-%                                Response(:, i, k) contains the vibration of the entire system 
-%                                at the i-th condition, excited EXCLUSIVELY by the unbalance forces 
-%                                from all shafts running at the EXACT SAME FREQUENCY as the k-th shaft.
-%
-% Algorithm Details:
-%   1. Gyroscopic Matrix Handling:
-%      For each operating condition, the total gyroscopic matrix (G_total) is dynamically assembled 
-%      by multiplying the base gyroscopic matrix block of each individual shaft by its corresponding 
-%      current spin speed. The system dynamic stiffness is assembled using (C - G_total) based on 
-%      the right-hand rule convention.
-%   2. Excitation Force Handling:
-%      - The unbalance input is converted into a base mass-eccentricity phasor (U_base), 
-%        where the Y-direction lags the X-direction by 90 degrees (F_y = -j * F_x).
-%      - To optimize computation, the algorithm identifies "Unique Speeds" in each condition. 
-%        If multiple shafts rotate at the same frequency, their unbalance base vectors are 
-%        superimposed (U_combined) before calculating the final force (F = U_combined * omega^2).
-%      - This ensures the dynamic stiffness matrix is inverted only once per unique frequency.
 
     arguments
         Parameter struct

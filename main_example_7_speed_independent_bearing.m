@@ -1,6 +1,6 @@
 %--------------------------------------------------------------------------
-% This example creates a two-disk rotor system with time independent
-% bearings (Just for solving in frequency domain)
+% This example creates a two-disk single-shaft rotor system with speed-dependent
+% bearings and solves the unbalance response in the frequency domain.
 %--------------------------------------------------------------------------
 
 clc

@@ -1,6 +1,5 @@
 %-----------------------------------------------------------------------------------
-% This example creates a twin-spool rotor system with speed ratio 1.3 during run-up.
-% This example shows new features to get Campbell diagram and modes
+% This example creates a twin-spool rotor system and computes Campbell diagram and mode shapes.
 %-----------------------------------------------------------------------------------
 
 clc

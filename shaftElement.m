@@ -86,7 +86,7 @@
 % % Generate element matrices
 % [Me, Ke, Ge, Ne, Fge, Unbal] = shaftElement(elemProps);
 %
-% Copyright (c) 2021-2025 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
 % This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
 %
 

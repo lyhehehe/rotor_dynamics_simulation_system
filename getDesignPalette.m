@@ -1,5 +1,30 @@
+%% getDesignPalette - Return project color palette as a nested structure
+%
+% This function provides a centralised set of RGB color values for consistent
+% plot styling across all visualization functions in the project.
+%
+%% Syntax
+%  c = getDesignPalette()
+%
+%% Description
+% |getDesignPalette| returns a nested struct |c| organized by category,
+% color family, and shade level. Each leaf field holds a 1×3 RGB row vector.
+% Access pattern: |c.Category.Color.sShade| (e.g., |c.Accents.Blue.s4|).
+% The palette contains:
+% * Background: Stone (warm grey), Grey (cool grey) — each with 6 shades (s1–s6)
+% * Accents: Red, Blue, Yellow — primary highlight colors
+% * Extended: Olive, Green, Teal, Purple, Orange, Skin — supplementary colors
+%   (also aliases Red, Blue, Yellow from Accents for uniform access)
+%
+%% Output Arguments
+% * |c| - Nested color palette structure [struct]
+%   Access: |c.Category.Color.sShade| where shade index s1 (lightest) to s6 (darkest)
+%
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
+%
+
 function c = getDesignPalette()
-    % GETPALETTE Returns the color template as a nested structure.
     % Use: c.Category.Color.sShade (e.g., c.Accents.Blue.s4)
 
     % Helper function to convert a 6-row matrix into a shade structure

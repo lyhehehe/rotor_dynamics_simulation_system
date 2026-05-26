@@ -27,29 +27,21 @@ G = Parameter.Matrix.gyroscopic;
 N = Parameter.Matrix.matrixN;
 K = Parameter.Matrix.stiffness;
 C = Parameter.Matrix.damping;
-G(1:84, 1:84) = domega(1)*G(1:84, 1:84);
-N(1:84, 1:84) = ddomega(1)*N(1:84, 1:84);
-G(85:152, 85:152) = domega(2)*G(85:152, 85:152);
-N(85:152, 85:152) = ddomega(2)*N(85:152, 85:152);
+G(1:68, 1:68) = domega(1)*G(1:68, 1:68);
+N(1:68, 1:68) = ddomega(1)*N(1:68, 1:68);
+G(69:116, 69:116) = domega(2)*G(69:116, 69:116);
+N(69:116, 69:116) = ddomega(2)*N(69:116, 69:116);
  
 % calculate linear part of J21 and J22
 J21_lin = -(K - N);
 J22_lin = -(C - G);
  
-% calculate jacobian for Hertzian force
-dHerzian_dyn = hertzianForceJacobian(yn, omega, Parameter.Matrix.HerzianParameter, Parameter.Mesh.dofNum);
- 
- 
-% calculate jacobian for customize force
-[dfCustom_dyn, dfCustom_ddyn] = Parameter.Custom.jacobian(yn, dyn, tn, omega, domega, ddomega, Parameter);
- 
- 
 % total J21 
-J21 = J21_lin + dHerzian_dyn + dfCustom_dyn;
+J21 = J21_lin;
  
  
 % total J22 
-J22 = J22_lin + dfCustom_ddyn;
+J22 = J22_lin;
  
 end
  

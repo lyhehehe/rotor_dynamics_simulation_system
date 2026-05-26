@@ -5,6 +5,7 @@
 # ignore auto-generated files
 dynamicEquation.m
 dynamicEquationNoMass.m
+jacobianJ21J22.m
 
 # ignore some folders
 meshDiagram

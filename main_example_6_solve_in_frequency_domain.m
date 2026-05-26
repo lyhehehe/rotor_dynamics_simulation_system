@@ -1,6 +1,5 @@
 %-----------------------------------------------------------------------------------
-% This example creates a twin-spool rotor system with speed ratio 1.3 during run-up.
-% This example shows new features to calculate unbalance response in the frequency domain.
+% This example creates a twin-spool rotor system and calculates unbalance response in the frequency domain.
 %-----------------------------------------------------------------------------------
 clc
 clear

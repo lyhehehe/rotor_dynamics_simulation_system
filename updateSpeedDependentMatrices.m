@@ -1,17 +1,38 @@
+%% updateSpeedDependentMatrices - Build global stiffness and damping matrices for speed-dependent bearings
+%
+% This function interpolates per-bearing stiffness and damping lookup tables
+% at the current shaft speeds and assembles the contributions into the global
+% sparse matrices for use in the frequency-domain solver.
+%
+%% Syntax
+%  [K_out, C_out] = updateSpeedDependentMatrices(SpdBearing, K_base, C_base, currentSpeeds, dofInterval)
+%
+%% Description
+% |updateSpeedDependentMatrices| loops over each speed-dependent bearing,
+% determines its shaft operating speed from |currentSpeeds|, performs 1-D
+% linear interpolation (clamped at the lookup table boundaries), and adds
+% the resulting 2×2 [Kxx Kxy; Kyx Kyy] and [Cxx Cxy; Cyx Cyy] blocks to
+% the global matrices. The function:
+% * Returns the base matrices unchanged if |SpdBearing| is empty or has zero bearings
+% * Issues a warning if any bearing has non-zero mass (mass matrix is not updated)
+% * Uses manual interpolation — does not require the Curve Fitting Toolbox
+%
+%% Input Arguments
+% * |SpdBearing|    - SpeedDependentBearing structure (from |inputSpeedDependentBearing*|)
+% * |K_base|        - Base global stiffness matrix [sparse, dofNum×dofNum]
+% * |C_base|        - Base global damping matrix [sparse, dofNum×dofNum]
+% * |currentSpeeds| - Current operating speeds for each shaft [rad/s] [shaftNum×1 double]
+% * |dofInterval|   - DOF index range for each node [N×2 integer array]
+%
+%% Output Arguments
+% * |K_out| - Updated global stiffness matrix [sparse, dofNum×dofNum]
+% * |C_out| - Updated global damping matrix [sparse, dofNum×dofNum]
+%
+% Copyright (c) 2021-2026 Haopeng Zhang, Northwestern Polytechnical University, Politecnico di Milano
+% This code is licensed under the MIT License. See the LICENSE file in the project root for the full text of the license.
+%
+
 function [K_out, C_out] = updateSpeedDependentMatrices(SpdBearing, K_base, C_base, currentSpeeds, dofInterval)
-% updateSpeedDependentMatrices - Generates speed-dependent global stiffness 
-% and damping matrices.
-%
-% Inputs:
-%   SpdBearing   : SpeedDependentBearing struct from InitialParameter
-%   K_base       : Base global stiffness matrix (sparse)
-%   C_base       : Base global damping matrix (sparse)
-%   currentSpeed : Scalar value of the current rotation speed (rad/s)
-%   dofInterval  : N x 2 array containing [startDof, endDof] for each node
-%
-% Outputs:
-%   K_out        : Updated global stiffness matrix (sparse)
-%   C_out        : Updated global damping matrix (sparse)
 
 K_out = K_base;
 C_out = C_base;
